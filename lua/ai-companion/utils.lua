@@ -1,5 +1,6 @@
 local M = {}
 local api = vim.api
+
 M.get_visual_selection = function()
   local bufnr = 0
   local mode = vim.fn.visualmode()
@@ -31,11 +32,9 @@ M.get_visual_selection = function()
     -- character-wise
     lines[1] = string.sub(lines[1], start_col + 1)
     lines[#lines] = string.sub(lines[#lines], 1, end_col + 1)
-
   elseif mode == "V" then
     -- line-wise (nothing to trim)
     return lines
-
   elseif mode == "\22" then
     -- block-wise (CTRL-V)
     for i, line in ipairs(lines) do
