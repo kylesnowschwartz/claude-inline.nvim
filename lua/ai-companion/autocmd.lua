@@ -3,6 +3,7 @@ local api = vim.api
 local utils = require("ai-companion.utils")
 local state = require("ai-companion.state")
 local ui = require("ai-companion.ui")
+local core_api = require("ai-companion.api")
 
 M.setup = function()
   local ns_old_code = state.highlight.old_code.ns
@@ -26,6 +27,21 @@ M.setup = function()
 
   api.nvim_create_autocmd("CursorMoved", {
     callback = function()
+      if vim.fn.mode():match("n") then
+        local old_sr, old_er = core_api.get_old_code_region()
+        if old_er == nil and old_sr == nil then return end
+        local cursor_pos = api.nvim_win_get_cursor(0)[1]
+        if old_sr == cursor_pos then
+          vim.schedule(function()
+            api.nvim_win_set_cursor(0, { old_er + 1, 0 })
+          end)
+        end
+        if old_er == cursor_pos then
+          vim.schedule(function()
+            api.nvim_win_set_cursor(0, { old_sr - 1, 0 })
+          end)
+        end
+      end
       if vim.fn.mode():match("[vV\22]") then
         ui.move_inline_command()
       end

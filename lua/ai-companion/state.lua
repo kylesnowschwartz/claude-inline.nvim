@@ -6,14 +6,20 @@ local M = {
       start_row = nil,
       end_row = nil,
       hl_group = "OldCode",
-      ns = api.nvim_create_namespace("OldCodeHighlight")
+      ns = api.nvim_create_namespace("OldCodeHighlight"),
+      id = nil
     },
     new_code = {
       start_row = nil,
       end_row = nil,
       hl_group = "NewCode",
-      ns = api.nvim_create_namespace("NewCodeHighlight")
+      ns = api.nvim_create_namespace("NewCodeHighlight"),
+      id = nil
     }
+  },
+  wins = {
+    accept = nil,
+    deny = nil
   },
   selected_text = "",
   main_bufnr = nil,

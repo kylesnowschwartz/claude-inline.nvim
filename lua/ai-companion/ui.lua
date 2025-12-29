@@ -17,7 +17,6 @@ local function override_vim_input()
     opts = opts or {}
     local prompt = opts.prompt
     local default = opts.default or ""
-
     local buf = api.nvim_create_buf(false, true)
     api.nvim_buf_set_lines(buf, 0, -1, false, { default })
     api.nvim_buf_set_option(buf, "modifiable", true)
@@ -92,6 +91,22 @@ function M.close_inline_command()
 
   win_id = nil
   bufnr = nil
+end
+
+function M.open_post_response_commands(row, lines, width, zindex)
+  bufnr = api.nvim_create_buf(false, true)
+  api.nvim_buf_set_lines(bufnr, 0, -1, false, { lines })
+
+  local win_id = api.nvim_open_win(bufnr, false, {
+    relative = "editor",
+    row = row,
+    col = vim.o.columns - width,
+    width = width,
+    height = 1,
+    style = "minimal",
+    zindex = zindex
+  })
+  return win_id
 end
 
 function M.setup()
