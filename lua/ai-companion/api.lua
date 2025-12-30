@@ -37,6 +37,7 @@ local function highlight_old_code()
     hl_group = highlight.old_code.hl_group,
     hl_eol = true,
   })
+  api.nvim_buf_set_lines(bufnr, highlight.old_code.end_row + 1, highlight.old_code.end_row + 1, false, { "" })
 end
 
 local function reset_states()
@@ -92,6 +93,18 @@ local function highlight_new_inserted_code()
     hl_group = highlight.new_code.hl_group,
     hl_eol = true,
   })
+end
+
+local function open_helper_commands_ui()
+  local _, old_er = M.get_old_code_region()
+  local accept_text = config.mappings.accept_response or ""
+  local decline_text = config.mappings.deny_response or ""
+  local accept_response = "Accept Edit (" .. accept_text .. ")"
+  local decline_response = "Decline Edit (" .. decline_text .. ")"
+  if old_er then
+    state.wins.accept = ui.open_post_response_commands(old_er, accept_response, 48, 10)
+    state.wins.deny = ui.open_post_response_commands(old_er, decline_response, 24, 20)
+  end
 end
 
 function M.get_response(input)
@@ -158,15 +171,7 @@ function M.get_response(input)
       insert_generated_code(lines)
       highlight_new_inserted_code()
       highlight_old_code()
-      local _, old_er = M.get_old_code_region()
-      local accept_text = config.mappings.accept_response or ""
-      local decline_text = config.mappings.deny_response or ""
-      local accept_response = "Accept Edit (" .. accept_text .. ")"
-      local decline_response = "Decline Edit (" .. decline_text .. ")"
-      if old_er then
-        state.wins.accept = ui.open_post_response_commands(old_er, accept_response, 48, 10)
-        state.wins.deny = ui.open_post_response_commands(old_er, decline_response, 24, 20)
-      end
+      open_helper_commands_ui()
     end)
   end)
 end

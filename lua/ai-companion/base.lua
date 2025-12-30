@@ -9,17 +9,21 @@ local function open_input_callback()
   vim.ui.input({ prompt = "Enter prompt:" }, function(input)
     if input and input ~= "" then
       core_api.get_response(input)
-      vim.cmd("stopinsert")
+      vim.cmd.stopinsert()
     end
   end)
 end
 
 function M.setup()
-  vim.keymap.set("v", config.mappings.open_input, open_input_callback, { desc = "Opening the input prompt." })
-  vim.keymap.set("n", config.mappings.deny_response, core_api.reject_api_response,
-    { desc = "Declining the API response." })
-  vim.keymap.set("n", config.mappings.accept_response, core_api.accept_api_response,
-    { desc = "Accepting the API response." })
+  local keymaps = {
+    { "v", config.mappings.open_input, open_input_callback, "Opening the input prompt." },
+    { "n", config.mappings.deny_response, core_api.reject_api_response, "Declining the API response." },
+    { "n", config.mappings.accept_response, core_api.accept_api_response, "Accepting the API response." },
+  }
+
+  for _, map in ipairs(keymaps) do
+    vim.keymap.set(map[1], map[2], map[3], { desc = map[4] })
+  end
 end
 
 return M

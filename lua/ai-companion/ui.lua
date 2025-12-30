@@ -3,14 +3,11 @@ local M = {}
 local api = vim.api
 local config = require("ai-companion.config")
 
-local bufnr
-local win_id
-local input_overridden = false
+local bufnr, win_id
+local input_overridden
 
 local function override_vim_input()
-  if input_overridden then
-    return
-  end
+  if input_overridden then return end
   input_overridden = true
 
   vim.ui.input = function(opts, on_confirm)
@@ -33,12 +30,13 @@ local function override_vim_input()
       title_pos = "left",
     })
 
-    vim.keymap.set("i", "<CR>", function()
+    local function confirm()
       local text = table.concat(api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
       api.nvim_win_close(win, true)
       on_confirm(text ~= "" and text or nil)
-    end, { buffer = buf })
+    end
 
+    vim.keymap.set("i", "<CR>", confirm, { buffer = buf })
     vim.keymap.set("i", "<Esc>", function()
       api.nvim_win_close(win, true)
       on_confirm(nil)
@@ -50,9 +48,7 @@ local function override_vim_input()
 end
 
 function M.open_inline_command()
-  if win_id and api.nvim_win_is_valid(win_id) then
-    return
-  end
+  if win_id and api.nvim_win_is_valid(win_id) then return end
 
   bufnr = api.nvim_create_buf(false, true)
   local open_input = config.mappings.open_input or ""
@@ -69,9 +65,7 @@ function M.open_inline_command()
 end
 
 function M.move_inline_command()
-  if not win_id or not api.nvim_win_is_valid(win_id) then
-    return
-  end
+  if not (win_id and api.nvim_win_is_valid(win_id)) then return end
 
   api.nvim_win_set_config(win_id, {
     relative = "cursor",
@@ -84,29 +78,26 @@ function M.close_inline_command()
   if win_id and api.nvim_win_is_valid(win_id) then
     api.nvim_win_close(win_id, true)
   end
-
   if bufnr and api.nvim_buf_is_valid(bufnr) then
     api.nvim_buf_delete(bufnr, { force = true })
   end
-
-  win_id = nil
-  bufnr = nil
+  win_id, bufnr = nil, nil
 end
 
 function M.open_post_response_commands(row, lines, width, zindex)
   bufnr = api.nvim_create_buf(false, true)
   api.nvim_buf_set_lines(bufnr, 0, -1, false, { lines })
 
-  local win_id = api.nvim_open_win(bufnr, false, {
+  local win = api.nvim_open_win(bufnr, false, {
     relative = "editor",
     row = row,
     col = vim.o.columns - width,
     width = width,
     height = 1,
     style = "minimal",
-    zindex = zindex
+    zindex = zindex,
   })
-  return win_id
+  return win
 end
 
 function M.setup()
