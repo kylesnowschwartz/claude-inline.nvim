@@ -1,32 +1,28 @@
-<p align="center">
-  <h1>Cursor-Inline</h1>
-</p>
+# claude-inline.nvim
 
-Cursor-style inline AI editing for Neovim. Select code, describe the change, and get an inline, highlighted edit you can accept or reject—similar to Cursor’s inline workflow.
+Cursor-style inline AI editing for Neovim, powered by Claude Code CLI.
 
-https://github.com/user-attachments/assets/55e2a362-19bf-4813-a734-ca28a9916b16
-
+Select code in visual mode, open the Claude terminal, describe a change, and get a native Neovim diff you can accept or reject.
 
 ## Features
 
-- Inline popup for AI edits, triggered from visual selection.
-- One-key accept or reject for generated inline edits.
+- **Claude Code Integration**: Communicates with Claude Code CLI via WebSocket
+- **Selection Tracking**: Visual selections are automatically shared with Claude
+- **Native Diff View**: Changes appear in a standard Neovim diff
+- **Simple Accept/Reject**: `:w` to accept changes, close buffer to reject
 
 ## Requirements
 
-- Neovim with support for `vim.system` (0.10+ is recommended).
-- `curl` available in your `PATH`.
-- An OpenAI API key with access to the configured model (default: `gpt-4.1-mini`).
+- Neovim 0.8+
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 
 ## Installation
-
-Use your favorite plugin manager. Examples below assume the repository path is `kylesnowschwartz/claude-inline` – adjust if your repo is named differently.
 
 ### lazy.nvim
 
 ```lua
 {
-  "kylesnowschwartz/claude-inline",
+  "kylesnowschwartz/claude-inline.nvim",
   config = function()
     require("claude-inline").setup()
   end,
@@ -37,64 +33,67 @@ Use your favorite plugin manager. Examples below assume the repository path is `
 
 ```lua
 use({
-  "kylesnowschwartz/claude-inline",
+  "kylesnowschwartz/claude-inline.nvim",
   config = function()
     require("claude-inline").setup()
   end,
 })
 ```
 
-### vim-plug
-
-```vim
-Plug 'kylesnowschwartz/claude-inline'
-```
-
-Then, somewhere in your Neovim config:
-
-```lua
-require("claude-inline").setup()
-```
-
 ## Configuration
 
-You can customize key mappings and the OpenAI model/provider via `setup`.
-
-Default configuration from `lua/claude-inline/config.lua`:
-
 ```lua
-{
+require("claude-inline").setup({
   mappings = {
-    open_input = "<leader>e",
-    accept_response = "<leader>y",
-    deny_response = "<leader>n",
+    toggle_terminal = "<leader>cc",  -- Toggle Claude terminal sidebar
   },
-  provider = {
-    name = "openai",
-    model = "gpt-4.1-mini",
-  },
-}
+})
 ```
 
-## API key handling
+No API keys required - Claude Code CLI handles authentication.
 
-On the first request, if no API key is found, the plugin:
+## Usage
 
-- Notifies that the `<provider.name>` API key is missing.
-- Prompts you in Neovim for the key.
-- Stores the key in a file under your Neovim `stdpath("data")` directory (plain text).
+1. **Select code** in visual mode
+2. **Exit visual mode** (press `Esc`) - selection is captured
+3. **Open Claude terminal** with `<leader>cc`
+4. **Ask Claude** to modify your selection (e.g., "add error handling to @selection")
+5. **Review the diff** that appears
+6. **Accept** with `:w` or **reject** by closing the buffer
 
-Subsequent requests reuse the stored key. Be aware that this key is stored unencrypted on your machine.
+## How It Works
 
----
+The plugin creates a WebSocket server that Claude Code CLI connects to. When you:
 
-## TODOs
+- **Select code**: The selection is tracked and can be referenced as `@selection` in Claude
+- **Ask for changes**: Claude calls the `openDiff` tool to show proposed changes
+- **Accept/Reject**: Your decision is sent back to Claude Code
 
-- [ ] Integrate multiple AI providers
-- [ ] Diff previews for edits
-- [ ] Streaming response support
+### Lock File
 
----
+The plugin creates a lock file at `~/.claude/ide/<port>.lock` so Claude Code CLI can discover and connect to it automatically.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `:lua require("claude-inline").toggle_terminal()` | Toggle Claude terminal |
+| `:lua require("claude-inline").start()` | Start WebSocket server |
+| `:lua require("claude-inline").stop()` | Stop WebSocket server |
+| `:lua require("claude-inline").get_status()` | Get server status |
+
+## Troubleshooting
+
+### Claude Code not connecting
+
+1. Check the lock file exists: `ls ~/.claude/ide/`
+2. Verify server is running: `:lua print(require("claude-inline").is_running())`
+3. Check the port: `:lua print(require("claude-inline").get_status().port)`
+
+### Selection not appearing in Claude
+
+1. Make sure you exit visual mode after selecting (press `Esc`)
+2. The selection is stored when you exit visual mode, not while selecting
 
 ## License
 
