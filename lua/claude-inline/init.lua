@@ -4,6 +4,7 @@ local base = require 'claude-inline.base'
 local autocmd = require 'claude-inline.autocmd'
 local lockfile = require 'claude-inline.lockfile'
 local websocket = require 'claude-inline.websocket'
+local terminal = require 'claude-inline.terminal'
 
 local M = {}
 
@@ -151,6 +152,58 @@ end
 ---@return table instances Array of instance info
 function M.list_claude_instances()
   return lockfile.find_claude_instances()
+end
+
+---Open the Claude terminal sidebar
+---Auto-starts the WebSocket server if not already running
+function M.open_terminal()
+  -- Auto-start server if not running
+  if not websocket.is_running() then
+    local success, err = M.start()
+    if not success then
+      vim.notify('Failed to start server for terminal: ' .. (err or 'unknown error'), vim.log.levels.ERROR)
+      return
+    end
+  end
+
+  local port = websocket.get_port()
+  if not port then
+    vim.notify('Server port not available', vim.log.levels.ERROR)
+    return
+  end
+
+  terminal.open(port, true)
+end
+
+---Close the Claude terminal sidebar
+function M.close_terminal()
+  terminal.close()
+end
+
+---Toggle the Claude terminal sidebar visibility
+function M.toggle_terminal()
+  -- Auto-start server if not running
+  if not websocket.is_running() then
+    local success, err = M.start()
+    if not success then
+      vim.notify('Failed to start server for terminal: ' .. (err or 'unknown error'), vim.log.levels.ERROR)
+      return
+    end
+  end
+
+  local port = websocket.get_port()
+  if not port then
+    vim.notify('Server port not available', vim.log.levels.ERROR)
+    return
+  end
+
+  terminal.toggle(port)
+end
+
+---Check if the Claude terminal is open
+---@return boolean is_open True if terminal is visible
+function M.is_terminal_open()
+  return terminal.is_open()
 end
 
 return M
