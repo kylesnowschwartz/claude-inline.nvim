@@ -1,8 +1,8 @@
 local M = {}
 
-local ui = require("cursor-inline.ui")
-local core_api = require("cursor-inline.api")
-local config = require("cursor-inline.config")
+local ui = require("claude-inline.ui")
+local core_api = require("claude-inline.api")
+local config = require("claude-inline.config")
 
 local function open_input_callback()
   ui.close_inline_command()

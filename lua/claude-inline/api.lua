@@ -1,10 +1,10 @@
 local M = {}
 
 local api = vim.api
-local prompts = require("cursor-inline.prompts")
-local config = require("cursor-inline.config")
-local state = require("cursor-inline.state")
-local utils = require("cursor-inline.utils")
+local prompts = require("claude-inline.prompts")
+local config = require("claude-inline.config")
+local state = require("claude-inline.state")
+local utils = require("claude-inline.utils")
 local highlight = state.highlight
 
 local function insert_generated_code(lines)

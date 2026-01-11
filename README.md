@@ -20,15 +20,15 @@ https://github.com/user-attachments/assets/55e2a362-19bf-4813-a734-ca28a9916b16
 
 ## Installation
 
-Use your favorite plugin manager. Examples below assume the repository path is `nishu-murmu/cursor-inline` – adjust if your repo is named differently.
+Use your favorite plugin manager. Examples below assume the repository path is `kylesnowschwartz/claude-inline` – adjust if your repo is named differently.
 
 ### lazy.nvim
 
 ```lua
 {
-  "nishu-murmu/cursor-inline",
+  "kylesnowschwartz/claude-inline",
   config = function()
-    require("cursor-inline").setup()
+    require("claude-inline").setup()
   end,
 }
 ```
@@ -37,9 +37,9 @@ Use your favorite plugin manager. Examples below assume the repository path is `
 
 ```lua
 use({
-  "nishu-murmu/cursor-inline",
+  "kylesnowschwartz/claude-inline",
   config = function()
-    require("cursor-inline").setup()
+    require("claude-inline").setup()
   end,
 })
 ```
@@ -47,20 +47,20 @@ use({
 ### vim-plug
 
 ```vim
-Plug 'nishu-murmu/cursor-inline'
+Plug 'kylesnowschwartz/claude-inline'
 ```
 
 Then, somewhere in your Neovim config:
 
 ```lua
-require("cursor-inline").setup()
+require("claude-inline").setup()
 ```
 
 ## Configuration
 
 You can customize key mappings and the OpenAI model/provider via `setup`.
 
-Default configuration from `lua/cursor-inline/config.lua`:
+Default configuration from `lua/claude-inline/config.lua`:
 
 ```lua
 {

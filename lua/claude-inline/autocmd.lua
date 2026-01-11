@@ -1,9 +1,9 @@
 local M = {}
 local api = vim.api
-local utils = require("cursor-inline.utils")
-local state = require("cursor-inline.state")
-local ui = require("cursor-inline.ui")
-local core_api = require("cursor-inline.api")
+local utils = require("claude-inline.utils")
+local state = require("claude-inline.state")
+local ui = require("claude-inline.ui")
+local core_api = require("claude-inline.api")
 
 M.setup = function()
   local ns_old_code = state.highlight.old_code.ns

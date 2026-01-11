@@ -3,9 +3,9 @@
 --- Handles individual client connections to our WebSocket server.
 --- Adapted from claudecode.nvim/lua/claudecode/server/client.lua
 ---@brief ]]
----@module 'cursor-inline.websocket.client'
-local frame = require 'cursor-inline.websocket.frame'
-local handshake = require 'cursor-inline.websocket.handshake'
+---@module 'claude-inline.websocket.client'
+local frame = require 'claude-inline.websocket.frame'
+local handshake = require 'claude-inline.websocket.handshake'
 
 local M = {}
 

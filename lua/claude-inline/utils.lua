@@ -1,8 +1,8 @@
 local M = {}
 local api = vim.api
-local state = require("cursor-inline.state")
-local config = require("cursor-inline.config")
-local ui = require("cursor-inline.ui")
+local state = require("claude-inline.state")
+local config = require("claude-inline.config")
+local ui = require("claude-inline.ui")
 local highlight = state.highlight
 
 function M.get_visual_selection()

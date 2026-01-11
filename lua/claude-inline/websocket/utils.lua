@@ -2,7 +2,7 @@
 --- Utility functions for WebSocket implementation.
 --- Adapted from claudecode.nvim/lua/claudecode/server/utils.lua
 ---@brief ]]
----@module 'cursor-inline.websocket.utils'
+---@module 'claude-inline.websocket.utils'
 local M = {}
 
 -- Lua 5.1 compatible bitwise operations (arithmetic emulation)

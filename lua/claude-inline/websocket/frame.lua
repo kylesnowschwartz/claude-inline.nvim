@@ -2,8 +2,8 @@
 --- WebSocket frame encoding and decoding (RFC 6455).
 --- Adapted from claudecode.nvim/lua/claudecode/server/frame.lua
 ---@brief ]]
----@module 'cursor-inline.websocket.frame'
-local utils = require 'cursor-inline.websocket.utils'
+---@module 'claude-inline.websocket.frame'
+local utils = require 'claude-inline.websocket.utils'
 
 local M = {}
 

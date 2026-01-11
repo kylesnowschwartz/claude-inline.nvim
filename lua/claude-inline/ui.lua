@@ -1,7 +1,7 @@
 local M = {}
 
 local api = vim.api
-local config = require("cursor-inline.config")
+local config = require("claude-inline.config")
 
 local bufnr, win_id
 local input_overridden

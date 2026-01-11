@@ -3,7 +3,7 @@
 --- This module handles both creation and discovery of lock files
 --- at ~/.claude/ide/*.lock for Claude Code CLI integration.
 ---@brief ]]
----@module 'cursor-inline.lockfile'
+---@module 'claude-inline.lockfile'
 local M = {}
 
 ---Path to the lock file directory

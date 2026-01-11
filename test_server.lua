@@ -11,7 +11,7 @@ for name, _ in pairs(package.loaded) do
   end
 end
 
-local cursor_inline = require 'cursor-inline'
+local cursor_inline = require 'claude-inline'
 
 print '=== Testing WebSocket Server ==='
 
@@ -63,6 +63,6 @@ print '  3. Set environment: export ENABLE_IDE_INTEGRATION=true'
 print '  4. Run: claude'
 print ''
 print 'To stop the server:'
-print '  :lua require("cursor-inline").stop()'
+print '  :lua require("claude-inline").stop()'
 print ''
 print('Current port: ' .. tostring(status.port))

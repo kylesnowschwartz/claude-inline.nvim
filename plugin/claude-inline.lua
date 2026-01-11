@@ -4,7 +4,7 @@ end
 
 vim.g.loaded_ai_companion = true
 
-local ok, ai_companion = pcall(require, "cursor-inline")
+local ok, ai_companion = pcall(require, "claude-inline")
 if not ok then
   return
 end

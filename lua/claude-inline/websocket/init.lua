@@ -3,9 +3,9 @@
 --- This module implements a WebSocket server that Claude Code CLI
 --- connects to, following the same protocol as claudecode.nvim.
 ---@brief ]]
----@module 'cursor-inline.websocket'
-local client_manager = require 'cursor-inline.websocket.client'
-local utils = require 'cursor-inline.websocket.utils'
+---@module 'claude-inline.websocket'
+local client_manager = require 'claude-inline.websocket.client'
+local utils = require 'claude-inline.websocket.utils'
 
 local M = {}
 

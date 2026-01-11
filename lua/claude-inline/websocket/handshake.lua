@@ -2,8 +2,8 @@
 --- WebSocket handshake handling (RFC 6455) for server mode.
 --- Adapted from claudecode.nvim/lua/claudecode/server/handshake.lua
 ---@brief ]]
----@module 'cursor-inline.websocket.handshake'
-local utils = require 'cursor-inline.websocket.utils'
+---@module 'claude-inline.websocket.handshake'
+local utils = require 'claude-inline.websocket.utils'
 
 local M = {}
 

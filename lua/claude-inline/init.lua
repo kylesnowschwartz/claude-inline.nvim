@@ -1,9 +1,9 @@
-local config = require 'cursor-inline.config'
-local ui = require 'cursor-inline.ui'
-local base = require 'cursor-inline.base'
-local autocmd = require 'cursor-inline.autocmd'
-local lockfile = require 'cursor-inline.lockfile'
-local websocket = require 'cursor-inline.websocket'
+local config = require 'claude-inline.config'
+local ui = require 'claude-inline.ui'
+local base = require 'claude-inline.base'
+local autocmd = require 'claude-inline.autocmd'
+local lockfile = require 'claude-inline.lockfile'
+local websocket = require 'claude-inline.websocket'
 
 local M = {}
 
