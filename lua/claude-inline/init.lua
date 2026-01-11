@@ -5,14 +5,92 @@ local autocmd = require 'claude-inline.autocmd'
 local lockfile = require 'claude-inline.lockfile'
 local websocket = require 'claude-inline.websocket'
 local terminal = require 'claude-inline.terminal'
+local tools = require 'claude-inline.tools'
+local client_manager = require 'claude-inline.websocket.client'
 
 local M = {}
+
+-- Initialize global table for deferred responses (coroutine-based blocking tools)
+_G.claude_deferred_responses = _G.claude_deferred_responses or {}
+
+---Send a JSON-RPC response to a client
+---@param client table The WebSocket client
+---@param id number|string|nil The request ID
+---@param result table|nil The result (for success)
+---@param err table|nil The error (for failure)
+local function send_response(client, id, result, err)
+  local response = {
+    jsonrpc = '2.0',
+    id = id,
+  }
+
+  if err then
+    response.error = err
+  else
+    response.result = result
+  end
+
+  local json = vim.json.encode(response)
+  client_manager.send_message(client, json)
+end
+
+---Handle JSON-RPC messages from Claude Code
+---@param client table The WebSocket client
+---@param message table Parsed JSON-RPC message
+local function handle_jsonrpc(client, message)
+  local method = message.method
+  local id = message.id
+  local params = message.params or {}
+
+  -- tools/list - Return available tools
+  if method == 'tools/list' then
+    local tool_list = tools.get_tool_list()
+    send_response(client, id, { tools = tool_list }, nil)
+    return
+  end
+
+  -- tools/call - Execute a tool
+  if method == 'tools/call' then
+    local result = tools.handle_invoke(client, params)
+
+    -- Check for deferred response (blocking tool like openDiff)
+    if result._deferred then
+      -- Store response sender for when coroutine resumes
+      local co_key = tostring(result.coroutine)
+      _G.claude_deferred_responses[co_key] = function(final_result)
+        vim.schedule(function()
+          if final_result.error then
+            send_response(client, id, nil, final_result.error)
+          else
+            send_response(client, id, final_result.result or final_result, nil)
+          end
+        end)
+      end
+      return
+    end
+
+    -- Immediate response
+    if result.error then
+      send_response(client, id, nil, result.error)
+    else
+      send_response(client, id, result.result, nil)
+    end
+    return
+  end
+
+  -- Unknown method
+  send_response(client, id, nil, {
+    code = -32601,
+    message = 'Method not found: ' .. (method or 'nil'),
+  })
+end
 
 function M.setup(opts)
   config.setup(opts or {})
   ui.setup()
   autocmd.setup()
   base.setup()
+  tools.setup()
 end
 
 ---Start the WebSocket server and create lock file
@@ -36,8 +114,15 @@ function M.start(opts)
     on_message = function(client, message)
       -- Parse JSON-RPC message
       local ok, parsed = pcall(vim.json.decode, message)
-      if ok and opts.on_message then
-        opts.on_message(client, parsed)
+      if ok then
+        -- Route through MCP handler
+        vim.schedule(function()
+          handle_jsonrpc(client, parsed)
+        end)
+        -- Also call user callback if provided
+        if opts.on_message then
+          opts.on_message(client, parsed)
+        end
       end
     end,
     on_connect = function(client)

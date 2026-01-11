@@ -1,37 +1,52 @@
 local M = {}
 local api = vim.api
-local utils = require("claude-inline.utils")
-local state = require("claude-inline.state")
-local ui = require("claude-inline.ui")
-local core_api = require("claude-inline.api")
+local utils = require 'claude-inline.utils'
+local state = require 'claude-inline.state'
+local ui = require 'claude-inline.ui'
+local core_api = require 'claude-inline.api'
 
 M.setup = function()
   local ns_old_code = state.highlight.old_code.ns
   local ns_new_code = state.highlight.new_code.ns
-  api.nvim_create_autocmd("ModeChanged", {
-    pattern = "n:[vV\22]",
+  api.nvim_create_autocmd('ModeChanged', {
+    pattern = 'n:[vV\22]',
     callback = function()
       ui.open_inline_command()
     end,
   })
 
-  api.nvim_create_autocmd("ModeChanged", {
-    pattern = "[vV\22]:n",
+  api.nvim_create_autocmd('ModeChanged', {
+    pattern = '[vV\22]:n',
     callback = function()
       ui.close_inline_command()
       local lines = utils.get_visual_selection()
-      state.main_bufnr = api.nvim_get_current_buf()
-      state.selected_text = table.concat(lines, "\n")
+      local bufnr = api.nvim_get_current_buf()
+      local text = table.concat(lines, '\n')
+
+      -- Get selection positions from marks (0-indexed line, 0-indexed character for LSP)
+      local start_mark = api.nvim_buf_get_mark(bufnr, '<')
+      local end_mark = api.nvim_buf_get_mark(bufnr, '>')
+
+      -- Update state with full selection info
+      state.set_selection(text, bufnr, {
+        line = start_mark[1] - 1, -- Convert to 0-indexed
+        character = start_mark[2],
+      }, {
+        line = end_mark[1] - 1, -- Convert to 0-indexed
+        character = end_mark[2],
+      })
     end,
   })
 
-  api.nvim_create_autocmd("CursorMoved", {
+  api.nvim_create_autocmd('CursorMoved', {
     callback = function()
-      if vim.fn.mode():match("n") then
+      if vim.fn.mode():match 'n' then
         local old_sr, old_er = core_api.get_old_code_region()
         local new_sr, new_er = core_api.get_new_code_region()
 
-        if old_er == nil and old_sr == nil then return end
+        if old_er == nil and old_sr == nil then
+          return
+        end
         local cursor_pos = api.nvim_win_get_cursor(0)[1]
         if old_sr == cursor_pos then
           vim.schedule(function()
@@ -47,7 +62,7 @@ M.setup = function()
         -- Update helper visibility based on cursor position
         local in_new_code = cursor_pos >= new_sr + 1 and cursor_pos <= new_er + 1
         local helpers_visible = state.wins.accept ~= nil or state.wins.deny ~= nil
-        
+
         if in_new_code and not helpers_visible then
           vim.schedule(function()
             utils.open_helper_commands_ui()
@@ -58,20 +73,20 @@ M.setup = function()
           end)
         end
       end
-      if vim.fn.mode():match("[vV\22]") then
+      if vim.fn.mode():match '[vV\22]' then
         ui.move_inline_command()
       end
     end,
   })
 
-  api.nvim_create_autocmd("BufWritePost", {
+  api.nvim_create_autocmd('BufWritePost', {
     callback = function()
       local bufnr = state.main_bufnr
       local highlight = state.highlight
       if highlight.new_code.start_row and highlight.new_code.end_row then
         api.nvim_set_hl(0, state.highlight.old_code.hl_group, {
-          bg = "#ea4859",
-          blend = 80
+          bg = '#ea4859',
+          blend = 80,
         })
         api.nvim_buf_set_extmark(bufnr or 0, ns_new_code, highlight.new_code.start_row, 0, {
           end_row = highlight.new_code.end_row - 1,
@@ -81,8 +96,8 @@ M.setup = function()
       end
       if highlight.old_code.start_row and highlight.old_code.end_row then
         api.nvim_set_hl(0, state.highlight.new_code.hl_group, {
-          bg = "#199f5a",
-          blend = 80
+          bg = '#199f5a',
+          blend = 80,
         })
         api.nvim_buf_set_extmark(bufnr or 0, ns_old_code, highlight.old_code.start_row, 0, {
           end_row = highlight.old_code.end_row + 1,
@@ -90,7 +105,7 @@ M.setup = function()
           hl_eol = true,
         })
       end
-    end
+    end,
   })
 end
 
