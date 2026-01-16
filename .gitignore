@@ -1,3 +1,8 @@
+# Development directories (not committed, useful locally)
+.cloned-sources/
+.agent-history/
+.claude/
+
 # Compiled Lua sources
 luac.out
 
