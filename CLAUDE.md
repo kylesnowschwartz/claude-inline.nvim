@@ -16,12 +16,13 @@ Single Claude CLI process stays alive, maintaining conversation memory. No WebSo
 lua/claude-inline/
 ├── init.lua      # Entry point, commands, keymaps, message routing
 ├── client.lua    # Claude process lifecycle, NDJSON parsing
-├── ui.lua        # Sidebar split, floating input, loading spinner
+├── ui.lua        # Sidebar split, floating input, loading spinner, thinking folds
 ├── selection.lua # Visual mode capture with proper mode handling
-└── config.lua    # Defaults and user config merge
+├── config.lua    # Defaults and user config merge
+└── debug.lua     # Debug logging to /tmp/claude-inline-debug.log
 ```
 
-**Total: ~500 lines of Lua, zero external dependencies.**
+**Total: ~600 lines of Lua, zero external dependencies.**
 
 ## How It Works
 
@@ -88,6 +89,8 @@ When Claude uses extended thinking, the plugin shows a collapsible section:
 
 The fold markers are vim-style (`{{{`/`}}}`) with `foldmethod=marker` on the buffer.
 
+**Known limitation (Jan 2026):** Claude CLI does not expose extended thinking events for OAuth-authenticated users. The `--betas interleaved-thinking` flag is rejected with "not allowed". The infrastructure is complete and will work if/when CLI adds support. API-key users with direct API access may have different capabilities.
+
 ## Commands & Keymaps
 
 | Command | Default Key | Mode | Action |
@@ -96,6 +99,7 @@ The fold markers are vim-style (`{{{`/`}}}`) with `foldmethod=marker` on the buf
 | `:ClaudeInlineSend` | `<leader>cs` | Visual | Send selection with prompt (includes filepath:lines context) |
 | `:ClaudeInlineToggle` | `<leader>ct` | Normal | Toggle sidebar visibility |
 | `:ClaudeInlineClear` | `<leader>cx` | Normal | Clear conversation, restart Claude process |
+| `:ClaudeInlineDebug on\|off` | - | Normal | Toggle debug logging |
 
 ## Configuration
 
@@ -110,8 +114,26 @@ require('claude-inline').setup({
     sidebar = { position = 'right', width = 0.4 },
     input = { border = 'rounded', width = 60, height = 3 },
   },
+  debug = false,  -- Enable to log messages to /tmp/claude-inline-debug.log
 })
 ```
+
+## Debugging
+
+Enable debug logging to inspect message flow:
+
+```lua
+-- In setup
+require('claude-inline').setup({ debug = true })
+
+-- Or at runtime
+:ClaudeInlineDebug on
+:ClaudeInlineDebug off
+```
+
+Log file: `/tmp/claude-inline-debug.log`
+
+Shows message types, stream events, and content block metadata. Useful for diagnosing issues with response parsing or duplicate content.
 
 ## Testing (Manual)
 

@@ -10,11 +10,6 @@ Minimal Claude chat for Neovim. Send prompts to Claude Code CLI with persistent 
 - **Streaming Responses**: See Claude's response as it's generated
 - **Zero Dependencies**: Pure Neovim Lua, no external plugins required
 
-## Requirements
-
-- Neovim 0.9+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
-
 ## Installation
 
 ### lazy.nvim
