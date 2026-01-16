@@ -276,4 +276,38 @@ function M.get_bufnr()
   return nil
 end
 
+--- Get the terminal job ID for sending input
+--- @return number|nil jobid The job ID or nil
+function M.get_jobid()
+  if is_valid() and jobid and jobid > 0 then
+    return jobid
+  end
+  return nil
+end
+
+--- Send text to the Claude terminal
+--- @param text string The text to send
+--- @return boolean success Whether text was sent
+function M.send(text)
+  local jid = M.get_jobid()
+  if not jid then
+    return false
+  end
+  vim.fn.chansend(jid, text)
+  return true
+end
+
+--- Send a prompt to Claude (text + Enter)
+--- @param prompt string The prompt to send
+--- @return boolean success Whether prompt was sent
+function M.send_prompt(prompt)
+  local jid = M.get_jobid()
+  if not jid then
+    return false
+  end
+  -- Send the prompt text followed by Enter
+  vim.fn.chansend(jid, prompt .. '\n')
+  return true
+end
+
 return M
