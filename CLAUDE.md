@@ -1,214 +1,129 @@
-# CLAUDE.md
+# claude-inline.nvim
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Active Development Context
-
-@.agent-history/context-packet-20260111.md
-
-## Project Overview
-
-claude-inline.nvim is a Neovim plugin providing Cursor-style inline AI editing via Claude Code CLI. Select code in visual mode, open the Claude terminal, describe a change, and get a native Neovim diff you can accept (`:w`) or reject (close buffer).
+Minimal Neovim plugin for chatting with Claude CLI. Persistent conversation context via stream-json format.
 
 ## Architecture
 
 ```
+User types prompt -> Floating input window -> Send to Claude process -> Parse NDJSON response -> Display in sidebar
+```
+
+Single Claude CLI process stays alive, maintaining conversation memory. No WebSocket, no MCP, no complexity.
+
+## Key Files
+
+```
 lua/claude-inline/
-├── init.lua       # Entry point: setup, WebSocket server, MCP JSON-RPC routing
-├── config.lua     # User configuration (keymaps only)
-├── api.lua        # DEPRECATED stub (OpenAI code removed)
-├── ui.lua         # Visual mode selection hint
-├── autocmd.lua    # ModeChanged autocommands, selection capture, broadcast
-├── state.lua      # Selection state for MCP tools
-├── utils.lua      # Visual selection extraction
-├── base.lua       # Keymap bindings (toggle_terminal only)
-├── diff.lua       # Native Neovim diff with blocking accept/reject
-├── lockfile.lua   # Lock file discovery for Claude Code CLI
-├── terminal.lua   # Terminal sidebar running Claude Code CLI
-├── websocket/     # WebSocket server implementation
-│   ├── init.lua   # Server lifecycle
-│   ├── client.lua # Client management
-│   └── ...        # Frame handling, handshake
-└── tools/         # MCP tools for Claude Code
-    ├── init.lua               # Tool registry
-    ├── get_current_selection.lua
-    ├── get_latest_selection.lua
-    └── open_diff.lua
-
-plugin/claude-inline.lua  # Plugin loader
+├── init.lua      # Entry point, commands, keymaps, message routing
+├── client.lua    # Claude process lifecycle, NDJSON parsing
+├── ui.lua        # Sidebar split, floating input, loading spinner
+└── config.lua    # Defaults and user config merge
 ```
 
-### Data Flow
+**Total: ~400 lines of Lua, zero external dependencies.**
 
-1. **Visual Selection**: User selects code, exits to normal mode
-2. **Selection Capture**: `autocmd.lua` captures selection, stores in `state.lua`, broadcasts `selection/changed` to Claude Code
-3. **Terminal**: `<leader>cc` opens terminal sidebar with Claude Code CLI
-4. **Claude Interaction**: User asks Claude to modify `@selection`
-5. **Diff View**: Claude calls `openDiff` MCP tool, native Neovim diff appears
-6. **Accept/Reject**: `:w` accepts (returns `FILE_SAVED`), close buffer rejects (returns `DIFF_REJECTED`)
+## How It Works
 
-### Key Implementation Details
-
-- **WebSocket Server**: Pure Lua RFC 6455 implementation for Claude Code CLI communication
-- **MCP Tools**: JSON-RPC 2.0 handlers for `getCurrentSelection`, `getLatestSelection`, `openDiff`
-- **Lock File**: `~/.claude/ide/[port].lock` allows Claude CLI to discover the server
-- **Blocking Diff**: Coroutine-based blocking in `openDiff` until user accepts/rejects
-
-## Development
-
-### Running Tests
-
+### Claude CLI Invocation
 ```bash
-# Run all unit tests (headless Neovim)
-nvim --headless -l tests/run_tests.lua
-
-# Run E2E smoke test
-nvim --headless -u NONE -c "set runtimepath+=." -l tests/e2e/smoke_test_spec.lua
-
-# Syntax check all Lua files
-for f in lua/claude-inline/*.lua; do luac -p "$f"; done
+claude -p --input-format stream-json --output-format stream-json
 ```
 
-### Test Infrastructure
+The `-p` flag runs in print mode (non-interactive). Stream-json keeps conversation context in the running process.
 
-Tests follow claudecode.nvim patterns using busted-style structure:
-
-```
-tests/
-├── busted_setup.lua           # Test setup: vim mock, expect() helpers, JSON utils
-├── mocks/
-│   └── vim.lua                # Comprehensive vim API mock
-├── run_tests.lua              # Headless test runner
-├── unit/                      # Unit tests (isolated, mocked)
-│   └── tools/
-│       ├── get_current_selection_spec.lua
-│       ├── get_latest_selection_spec.lua
-│       ├── open_diff_spec.lua
-│       └── tools_init_spec.lua
-└── e2e/                       # End-to-end tests (real plugin)
-    └── smoke_test_spec.lua
+### Message Format (Input)
+```json
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"your prompt"}]}}
 ```
 
-### Writing Tests
+### Message Types (Output)
+- `type: "system"` - Hook responses, init info. **Ignore these.**
+- `type: "assistant"` - Response content in `msg.message.content[].text`
+- `type: "result"` - Final result in `msg.result`, signals completion
 
-**File naming**: `*_spec.lua` for all test files
+### Flow
+1. `init.lua:send()` - Shows sidebar, appends user message, starts client if needed
+2. `client.lua:start()` - Spawns Claude process with `vim.uv.spawn()`, sets up NDJSON reader
+3. `client.lua:send()` - Writes JSON line to stdin
+4. NDJSON lines arrive on stdout, parsed and dispatched to `handle_message()`
+5. `handle_message()` stops spinner on first content, updates sidebar text
+6. On `result` message, streaming state resets for next turn
 
-**Required setup**: Always require the busted setup at the top:
+## Critical Implementation Details
 
+### Environment Inheritance
+Claude CLI needs full environment for auth credentials. **Do not filter:**
 ```lua
-require 'tests.busted_setup'
+-- WRONG: strips HOME, auth tokens, etc.
+local env = { 'PATH=' .. vim.fn.getenv('PATH') }
+uv.spawn(cmd, { args = args, env = env, ... })
+
+-- RIGHT: inherit everything
+uv.spawn(cmd, { args = args, stdio = {...} }, callback)
 ```
 
-**Test structure**: Use nested `describe()` for context, `it()` for assertions:
-
+### Spinner Race Condition
+The loading spinner runs on a 100ms timer calling `update_last_message()`. When Claude responds, we also call `update_last_message()` with actual content. **Must stop spinner BEFORE processing assistant message**, or timer overwrites response:
 ```lua
-require 'tests.busted_setup'
-
-describe('Module Name', function()
-  local module_under_test
-
-  before_each(function()
-    -- Clear cached modules to ensure isolation
-    package.loaded['claude-inline.module'] = nil
-
-    -- Set up mocks
-    _G.vim.api.nvim_get_current_buf = spy.new(function()
-      return 1
-    end)
-
-    -- Load module after mocks are configured
-    module_under_test = require('claude-inline.module')
-  end)
-
-  after_each(function()
-    -- Clean up
-    package.loaded['claude-inline.module'] = nil
-  end)
-
-  describe('specific feature', function()
-    it('should do something specific', function()
-      local result = module_under_test.some_function()
-
-      expect(result).to_be_table()
-      expect(result.success).to_be_true()
-    end)
-
-    it('should handle edge case', function()
-      -- Test edge case
-    end)
-  end)
-end)
+if msg_type == 'assistant' then
+  ui.hide_loading()  -- FIRST: stop the timer
+  -- THEN: process content
+end
 ```
 
-**Assertion helpers** (from `busted_setup.lua`):
+### Buffer Line Indexing
+Lua arrays are 1-indexed, `nvim_buf_set_lines` is 0-indexed. The code exploits this: when we find `**Claude:**` at Lua index `i`, passing `i` to `nvim_buf_set_lines` replaces content AFTER that line (which is what we want).
 
-```lua
-expect(value).to_be(expected)        -- Strict equality
-expect(value).to_be_nil()
-expect(value).to_be_true()
-expect(value).to_be_false()
-expect(value).to_be_table()
-expect(value).to_be_string()
-expect(value).to_be_function()
-expect(value).not_to_be_nil()
-expect(value).to_be_at_least(n)
+## Commands & Keymaps
 
-assert_contains(str_or_table, pattern)  -- String contains or table has element
-```
-
-**JSON helpers** for MCP responses:
-
-```lua
-local parsed = json_decode(result.content[1].text)
-expect(parsed.success).to_be_true()
-```
-
-**Mocking vim APIs**:
-
-```lua
--- Use spy.new for tracked mocks
-_G.vim.api.nvim_buf_get_name = spy.new(function(bufnr)
-  return '/test/file.lua'
-end)
-
--- Mock module dependencies via package.loaded
-local mock_state = { selected_text = 'test' }
-package.loaded['claude-inline.state'] = mock_state
-```
-
-### Test Principles
-
-- **Isolation**: Each test clears `package.loaded` to avoid state leakage
-- **Mocking**: Mock vim APIs and module dependencies, not the module under test
-- **Coverage**: Test both happy paths and error cases
-- **Naming**: Descriptive `it()` descriptions that read as specifications
-- **MCP Format**: Tool tests verify the `{content: [{type: "text", text: JSON}]}` structure
+| Command | Default Key | Action |
+|---------|-------------|--------|
+| `:ClaudeInlineSend` | `<leader>cs` | Open floating input prompt |
+| `:ClaudeInlineToggle` | `<leader>ct` | Toggle sidebar visibility |
+| `:ClaudeInlineClear` | `<leader>cx` | Clear conversation, restart Claude process |
 
 ## Configuration
 
 ```lua
-require("claude-inline").setup({
-  mappings = {
-    toggle_terminal = "<leader>cc",  -- Toggle Claude terminal sidebar
+require('claude-inline').setup({
+  keymaps = {
+    send = '<leader>cs',
+    toggle = '<leader>ct',
+    clear = '<leader>cx',
+  },
+  ui = {
+    sidebar = { position = 'right', width = 0.4 },
+    input = { border = 'rounded', width = 60, height = 3 },
   },
 })
 ```
 
-No API keys required - Claude Code CLI handles authentication.
+## Testing (Manual)
 
-## Reference: claudecode.nvim
+No automated tests yet. Manual verification:
+1. `:lua require('claude-inline').setup()`
+2. `<leader>cs` -> type "Hello" -> Enter
+3. Verify response appears in sidebar
+4. Send follow-up "What did I just say?" -> verify context retained
+5. `<leader>cx` -> verify fresh conversation starts
 
-`.cloned-sources/claudecode.nvim/` contains coder/claudecode.nvim as reference material. This is a mature Neovim plugin implementing the same MCP protocol.
+## Future Ideas
 
-### Key Documentation
+- Visual selection context (send `@selection` with prompts)
+- Auto-include current buffer filename/filetype
+- Syntax highlighting in sidebar (treesitter markdown)
+- Keybind to yank Claude's last response
+- Conversation history persistence across sessions
 
-- `ARCHITECTURE.md` - Component overview and design decisions
-- `PROTOCOL.md` - MCP protocol and WebSocket implementation details
-- `CLAUDE.md` - Development commands and quality gates
+## Development Commands
 
-### Code Patterns
+```bash
+# Syntax check
+luajit -bl lua/claude-inline/*.lua > /dev/null && echo "OK"
 
-- **Config merging**: `vim.tbl_deep_extend("force", defaults, user_opts)`
-- **Async scheduling**: `vim.schedule()` for UI updates from callbacks
-- **Buffer validation**: Always check `nvim_buf_is_valid()` before operations
-- **MCP format**: All tools return `{content: [{type: "text", text: JSON}]}`
+# Test Claude CLI format directly
+echo '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}' | claude -p --input-format stream-json --output-format stream-json
+
+# Load in Neovim for testing
+nvim --cmd "set rtp+=~/Code/my-projects/claude-inline.nvim"
+```
