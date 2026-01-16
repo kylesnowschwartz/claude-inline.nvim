@@ -37,10 +37,13 @@ end
 
 --- Show the sidebar
 function M.show_sidebar()
+  -- Sidebar already visible, nothing to do
   if M.is_sidebar_open() then
-    vim.api.nvim_set_current_win(M._state.sidebar_win)
     return
   end
+
+  -- Save current window to restore focus after creating sidebar
+  local original_win = vim.api.nvim_get_current_win()
 
   local config = M._state.config.ui.sidebar
 
@@ -57,7 +60,7 @@ function M.show_sidebar()
   -- Calculate width
   local width = math.floor(vim.o.columns * config.width)
 
-  -- Create split
+  -- Create split (this focuses the new window)
   local cmd = config.position == 'left' and 'topleft' or 'botright'
   vim.cmd(cmd .. ' vertical ' .. width .. 'split')
 
@@ -79,6 +82,9 @@ function M.show_sidebar()
       M._state.sidebar_win = nil
     end,
   })
+
+  -- Restore focus to original window - sidebar is for display, not editing
+  vim.api.nvim_set_current_win(original_win)
 end
 
 --- Hide the sidebar
@@ -229,6 +235,7 @@ function M.show_input(callback)
     vim.api.nvim_win_close(win, true)
     M._state.input_win = nil
     M._state.input_buf = nil
+    vim.cmd 'stopinsert'
 
     if callback and input ~= '' then
       callback(input)
@@ -242,6 +249,7 @@ function M.show_input(callback)
     vim.api.nvim_win_close(win, true)
     M._state.input_win = nil
     M._state.input_buf = nil
+    vim.cmd 'stopinsert'
     if callback then
       callback(nil)
     end
