@@ -12,6 +12,9 @@ local uv = vim.uv or vim.loop
 ---@field loading_timer uv.uv_timer_t|nil
 ---@field spinner_index number
 ---@field config table|nil
+---@field thinking_start_line number|nil Line where thinking section starts
+---@field thinking_active boolean Whether currently streaming thinking
+---@field response_start_line number|nil Line where response text starts (after thinking)
 
 M._state = {
   sidebar_win = nil,
@@ -21,6 +24,9 @@ M._state = {
   loading_timer = nil,
   spinner_index = 1,
   config = nil,
+  thinking_start_line = nil,
+  thinking_active = false,
+  response_start_line = nil,
 }
 
 --- Setup UI module with configuration
@@ -73,6 +79,10 @@ function M.show_sidebar()
   vim.api.nvim_set_option_value('number', false, { win = M._state.sidebar_win })
   vim.api.nvim_set_option_value('relativenumber', false, { win = M._state.sidebar_win })
   vim.api.nvim_set_option_value('signcolumn', 'no', { win = M._state.sidebar_win })
+  -- Folding for collapsible thinking sections
+  vim.api.nvim_set_option_value('foldmethod', 'marker', { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value('foldenable', true, { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value('foldlevel', 99, { win = M._state.sidebar_win }) -- Start open, collapse manually
 
   -- Setup autocmd to track window close
   vim.api.nvim_create_autocmd('WinClosed', {
@@ -143,22 +153,27 @@ function M.update_last_message(text)
     return
   end
 
-  -- Find the last "**Claude:**" marker and replace everything after it
-  local lines = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, 0, -1, false)
-  local last_claude_line = nil
+  local start_line
 
-  for i = #lines, 1, -1 do
-    if lines[i]:match '^%*%*Claude:%*%*' then
-      last_claude_line = i
-      break
+  -- If we have a response start line (after thinking section), use that
+  if M._state.response_start_line then
+    start_line = M._state.response_start_line
+  else
+    -- Find the last "**Claude:**" marker and replace everything after it
+    local lines = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, 0, -1, false)
+    for i = #lines, 1, -1 do
+      if lines[i]:match '^%*%*Claude:%*%*' then
+        start_line = i -- 1-indexed Lua, becomes 0-indexed line number for nvim_buf_set_lines
+        break
+      end
     end
   end
 
-  if last_claude_line then
+  if start_line then
     local new_lines = vim.split(text .. '\n', '\n', { plain = true })
 
     vim.api.nvim_set_option_value('modifiable', true, { buf = M._state.sidebar_buf })
-    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, last_claude_line, -1, false, new_lines)
+    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, start_line, -1, false, new_lines)
     vim.api.nvim_set_option_value('modifiable', false, { buf = M._state.sidebar_buf })
 
     -- Scroll to bottom
@@ -167,6 +182,125 @@ function M.update_last_message(text)
       vim.api.nvim_win_set_cursor(M._state.sidebar_win, { new_count, 0 })
     end
   end
+end
+
+--- Start a thinking section in the sidebar
+--- Note: Called after show_loading, which already added **Claude:** header
+function M.show_thinking()
+  if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
+    return
+  end
+
+  -- Track where thinking starts
+  M._state.thinking_start_line = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
+  M._state.thinking_active = true
+
+  -- Insert thinking header with fold marker (replaces the loading spinner)
+  local header = '> *Thinking...* {{{'
+  vim.api.nvim_set_option_value('modifiable', true, { buf = M._state.sidebar_buf })
+
+  -- Find Claude marker and insert thinking section after it
+  local lines = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, 0, -1, false)
+  local claude_line = nil
+  for i = #lines, 1, -1 do
+    if lines[i]:match '^%*%*Claude:%*%*' then
+      claude_line = i
+      break
+    end
+  end
+
+  if claude_line then
+    -- Replace everything after Claude: with thinking header
+    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, claude_line, -1, false, { header })
+    M._state.thinking_start_line = claude_line + 1 -- Line after the header
+  end
+
+  vim.api.nvim_set_option_value('modifiable', false, { buf = M._state.sidebar_buf })
+end
+
+--- Update thinking content (streaming)
+---@param text string Full thinking text so far
+function M.update_thinking(text)
+  if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
+    return
+  end
+
+  if not M._state.thinking_start_line then
+    return
+  end
+
+  -- Format thinking lines with > prefix
+  local thinking_lines = vim.split(text, '\n', { plain = true })
+  local formatted = {}
+  for _, line in ipairs(thinking_lines) do
+    table.insert(formatted, '> ' .. line)
+  end
+
+  vim.api.nvim_set_option_value('modifiable', true, { buf = M._state.sidebar_buf })
+
+  -- Replace from thinking start line onward
+  -- Keep the header line, replace content after it
+  local start_line = M._state.thinking_start_line
+  vim.api.nvim_buf_set_lines(M._state.sidebar_buf, start_line, -1, false, formatted)
+
+  vim.api.nvim_set_option_value('modifiable', false, { buf = M._state.sidebar_buf })
+
+  -- Scroll to bottom
+  if M.is_sidebar_open() then
+    local new_count = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
+    vim.api.nvim_win_set_cursor(M._state.sidebar_win, { new_count, 0 })
+  end
+end
+
+--- Collapse thinking section and prepare for response
+function M.collapse_thinking()
+  if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
+    return
+  end
+
+  if not M._state.thinking_start_line or not M._state.thinking_active then
+    return
+  end
+
+  M._state.thinking_active = false
+
+  vim.api.nvim_set_option_value('modifiable', true, { buf = M._state.sidebar_buf })
+
+  -- Count thinking lines for summary
+  local line_count = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
+  local thinking_line_count = line_count - M._state.thinking_start_line
+
+  -- Update header to show line count
+  local header_line = M._state.thinking_start_line - 1 -- 0-indexed
+  local header = string.format('> *Thinking (%d lines)* {{{', thinking_line_count)
+  vim.api.nvim_buf_set_lines(M._state.sidebar_buf, header_line, header_line + 1, false, { header })
+
+  -- Add closing fold marker and blank line for response
+  vim.api.nvim_buf_set_lines(M._state.sidebar_buf, -1, -1, false, { '> }}}', '' })
+
+  -- Track where response text should start
+  M._state.response_start_line = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
+
+  vim.api.nvim_set_option_value('modifiable', false, { buf = M._state.sidebar_buf })
+
+  -- Close the fold if sidebar window is valid
+  if M.is_sidebar_open() then
+    vim.schedule(function()
+      -- Move cursor to thinking header and close fold
+      local header_lnum = M._state.thinking_start_line
+      pcall(function()
+        vim.api.nvim_win_set_cursor(M._state.sidebar_win, { header_lnum, 0 })
+        vim.api.nvim_win_call(M._state.sidebar_win, function()
+          vim.cmd 'normal! zc'
+        end)
+        -- Move to end for response
+        local new_count = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
+        vim.api.nvim_win_set_cursor(M._state.sidebar_win, { new_count, 0 })
+      end)
+    end)
+  end
+
+  M._state.thinking_start_line = nil
 end
 
 --- Clear the conversation buffer
@@ -178,6 +312,11 @@ function M.clear()
   vim.api.nvim_set_option_value('modifiable', true, { buf = M._state.sidebar_buf })
   vim.api.nvim_buf_set_lines(M._state.sidebar_buf, 0, -1, false, {})
   vim.api.nvim_set_option_value('modifiable', false, { buf = M._state.sidebar_buf })
+
+  -- Reset thinking state
+  M._state.thinking_start_line = nil
+  M._state.thinking_active = false
+  M._state.response_start_line = nil
 end
 
 --- Show input prompt window
@@ -305,6 +444,9 @@ function M.cleanup()
   end
   M._state.input_win = nil
   M._state.input_buf = nil
+  M._state.thinking_start_line = nil
+  M._state.thinking_active = false
+  M._state.response_start_line = nil
 end
 
 return M

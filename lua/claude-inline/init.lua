@@ -10,6 +10,9 @@ local selection = require 'claude-inline.selection'
 M._state = {
   initialized = false,
   streaming_text = '',
+  thinking_text = '',
+  content_blocks = {}, -- Track content blocks by index
+  current_block_type = nil, -- 'thinking' or 'text'
 }
 
 --- Handle incoming messages from Claude CLI
@@ -19,6 +22,45 @@ local function handle_message(msg)
 
   if msg_type == 'system' then
     -- Ignore system/hook messages
+    return
+  end
+
+  -- Handle granular streaming events (with --include-partial-messages)
+  if msg_type == 'stream_event' then
+    local event = msg.event
+    if not event then
+      return
+    end
+
+    if event.type == 'content_block_start' then
+      local block = event.content_block or {}
+      local index = event.index or 0
+      M._state.content_blocks[index] = { type = block.type }
+      M._state.current_block_type = block.type
+
+      if block.type == 'thinking' then
+        -- Starting a thinking block
+        ui.hide_loading()
+        ui.show_thinking()
+      end
+    elseif event.type == 'content_block_delta' then
+      local delta = event.delta or {}
+
+      if delta.type == 'thinking_delta' then
+        M._state.thinking_text = M._state.thinking_text .. (delta.thinking or '')
+        ui.update_thinking(M._state.thinking_text)
+      elseif delta.type == 'text_delta' then
+        -- First text after thinking? Collapse thinking section
+        if M._state.thinking_text ~= '' and M._state.streaming_text == '' then
+          ui.collapse_thinking()
+        end
+        ui.hide_loading()
+        M._state.streaming_text = M._state.streaming_text .. (delta.text or '')
+        ui.update_last_message(M._state.streaming_text)
+      end
+    elseif event.type == 'content_block_stop' then
+      M._state.current_block_type = nil
+    end
     return
   end
 
@@ -52,6 +94,9 @@ local function handle_message(msg)
     end
 
     M._state.streaming_text = ''
+    M._state.thinking_text = ''
+    M._state.content_blocks = {}
+    M._state.current_block_type = nil
     return
   end
 end
@@ -79,6 +124,9 @@ function M.send(prompt)
 
   -- Reset streaming state
   M._state.streaming_text = ''
+  M._state.thinking_text = ''
+  M._state.content_blocks = {}
+  M._state.current_block_type = nil
 
   -- Start client if needed
   if not client.is_running() then
@@ -135,6 +183,9 @@ function M.clear()
   ui.clear()
   client.stop()
   M._state.streaming_text = ''
+  M._state.thinking_text = ''
+  M._state.content_blocks = {}
+  M._state.current_block_type = nil
 end
 
 --- Setup the plugin

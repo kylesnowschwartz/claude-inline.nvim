@@ -39,6 +39,10 @@ The `-p` flag runs in print mode (non-interactive). Stream-json keeps conversati
 
 ### Message Types (Output)
 - `type: "system"` - Hook responses, init info. **Ignore these.**
+- `type: "stream_event"` - Granular streaming events (with `--include-partial-messages`):
+  - `event.type: "content_block_start"` with `content_block.type` ("thinking" or "text")
+  - `event.type: "content_block_delta"` with `delta.type` ("thinking_delta" or "text_delta")
+  - `event.type: "content_block_stop"`
 - `type: "assistant"` - Response content in `msg.message.content[].text`
 - `type: "result"` - Final result in `msg.result`, signals completion
 
@@ -74,6 +78,15 @@ end
 
 ### Buffer Line Indexing
 Lua arrays are 1-indexed, `nvim_buf_set_lines` is 0-indexed. The code exploits this: when we find `**Claude:**` at Lua index `i`, passing `i` to `nvim_buf_set_lines` replaces content AFTER that line (which is what we want).
+
+### Thinking Block Display
+When Claude uses extended thinking, the plugin shows a collapsible section:
+1. `stream_event` with `content_block.type == "thinking"` triggers `show_thinking()`
+2. Thinking content streams with `> ` prefix inside fold markers `{{{`...`}}}`
+3. When text starts, `collapse_thinking()` closes the fold and tracks `response_start_line`
+4. User can toggle fold with `za` to see thinking content
+
+The fold markers are vim-style (`{{{`/`}}}`) with `foldmethod=marker` on the buffer.
 
 ## Commands & Keymaps
 
