@@ -6,6 +6,7 @@ local config = require 'claude-inline.config'
 local client = require 'claude-inline.client'
 local ui = require 'claude-inline.ui'
 local selection = require 'claude-inline.selection'
+local debug = require 'claude-inline.debug'
 
 M._state = {
   initialized = false,
@@ -18,6 +19,9 @@ M._state = {
 --- Handle incoming messages from Claude CLI
 ---@param msg table
 local function handle_message(msg)
+  -- Debug logging
+  debug.log_message(msg)
+
   local msg_type = msg.type
 
   if msg_type == 'system' then
@@ -68,6 +72,13 @@ local function handle_message(msg)
     -- Stop spinner immediately when we get content
     ui.hide_loading()
 
+    -- If we already have streamed content via stream_events, skip
+    -- The assistant message is just a summary of what we already displayed
+    if M._state.streaming_text ~= '' then
+      return
+    end
+
+    -- Fallback: if no stream_events came, use assistant message content
     local content = msg.message and msg.message.content
     if content then
       for _, block in ipairs(content) do
@@ -196,6 +207,11 @@ function M.setup(opts)
   client.setup(cfg)
   ui.setup(cfg)
 
+  -- Enable debug logging if configured
+  if cfg.debug then
+    debug.enable()
+  end
+
   M._state.initialized = true
 
   -- Create user commands
@@ -210,6 +226,16 @@ function M.setup(opts)
   vim.api.nvim_create_user_command('ClaudeInlineClear', function()
     M.clear()
   end, { desc = 'Clear Claude conversation' })
+
+  vim.api.nvim_create_user_command('ClaudeInlineDebug', function(opts)
+    if opts.args == 'on' then
+      debug.enable()
+    elseif opts.args == 'off' then
+      debug.disable()
+    else
+      vim.notify('Usage: ClaudeInlineDebug on|off', vim.log.levels.INFO)
+    end
+  end, { nargs = '?', desc = 'Toggle debug logging' })
 
   -- Setup keymaps
   local keymaps = cfg.keymaps
@@ -232,5 +258,8 @@ function M.setup(opts)
     end,
   })
 end
+
+-- Expose debug module for direct access
+M.debug = debug
 
 return M

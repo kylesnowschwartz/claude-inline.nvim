@@ -4,30 +4,38 @@ local M = {}
 --- Default configuration
 M.defaults = {
   keymaps = {
-    send = "<leader>cs", -- Send prompt
-    toggle = "<leader>ct", -- Toggle sidebar
-    clear = "<leader>cx", -- Clear conversation
+    send = '<leader>cs', -- Send prompt
+    toggle = '<leader>ct', -- Toggle sidebar
+    clear = '<leader>cx', -- Clear conversation
   },
   ui = {
     sidebar = {
-      position = "right", -- 'left' or 'right'
+      position = 'right', -- 'left' or 'right'
       width = 0.4, -- 40% of editor width
     },
     input = {
-      border = "rounded",
+      border = 'rounded',
       width = 60,
       height = 3,
     },
     loading = {
-      text = "Thinking...",
-      spinner = { "|", "/", "-", "\\" },
+      text = 'Thinking...',
+      spinner = { '|', '/', '-', '\\' },
       interval = 100,
     },
   },
   claude = {
-    command = "claude",
-    args = { "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages" },
+    command = 'claude',
+    args = {
+      '-p',
+      '--input-format',
+      'stream-json',
+      '--output-format',
+      'stream-json',
+      '--include-partial-messages',
+    },
   },
+  debug = false, -- Enable debug logging to /tmp/claude-inline-debug.log
 }
 
 --- Active configuration (set after setup)
@@ -37,7 +45,7 @@ M.options = {}
 ---@param user_config? table
 ---@return table
 function M.setup(user_config)
-  M.options = vim.tbl_deep_extend("force", M.defaults, user_config or {})
+  M.options = vim.tbl_deep_extend('force', M.defaults, user_config or {})
   return M.options
 end
 
