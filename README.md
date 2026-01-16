@@ -1,19 +1,18 @@
 # claude-inline.nvim
 
-Cursor-style inline AI editing for Neovim, powered by Claude Code CLI.
-
-Select code in visual mode, open the Claude terminal, describe a change, and get a native Neovim diff you can accept or reject.
+Minimal Claude chat for Neovim. Send prompts to Claude Code CLI with persistent conversation context in a sidebar.
 
 ## Features
 
-- **Claude Code Integration**: Communicates with Claude Code CLI via WebSocket
-- **Selection Tracking**: Visual selections are automatically shared with Claude
-- **Native Diff View**: Changes appear in a standard Neovim diff
-- **Simple Accept/Reject**: `:w` to accept changes, close buffer to reject
+- **Persistent Conversation**: Claude remembers context across messages (same process)
+- **Sidebar Chat**: Conversation history in a dedicated split window
+- **Floating Input**: Clean prompt input without leaving your code
+- **Streaming Responses**: See Claude's response as it's generated
+- **Zero Dependencies**: Pure Neovim Lua, no external plugins required
 
 ## Requirements
 
-- Neovim 0.8+
+- Neovim 0.9+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
 
 ## Installation
@@ -29,71 +28,64 @@ Select code in visual mode, open the Claude terminal, describe a change, and get
 }
 ```
 
-### packer.nvim
+### Manual
 
-```lua
-use({
-  "kylesnowschwartz/claude-inline.nvim",
-  config = function()
-    require("claude-inline").setup()
-  end,
-})
+Clone to your Neovim packages directory:
+
+```bash
+git clone https://github.com/kylesnowschwartz/claude-inline.nvim \
+  ~/.local/share/nvim/site/pack/plugins/start/claude-inline.nvim
 ```
 
 ## Configuration
 
 ```lua
 require("claude-inline").setup({
-  mappings = {
-    toggle_terminal = "<leader>cc",  -- Toggle Claude terminal sidebar
+  keymaps = {
+    send = '<leader>cs',      -- Send prompt
+    toggle = '<leader>ct',    -- Toggle sidebar
+    clear = '<leader>cx',     -- Clear conversation
+  },
+  ui = {
+    sidebar = {
+      position = 'right',     -- 'left' or 'right'
+      width = 0.4,            -- 40% of editor width
+    },
+    input = {
+      border = 'rounded',
+      width = 60,
+      height = 3,
+    },
   },
 })
 ```
 
-No API keys required - Claude Code CLI handles authentication.
-
 ## Usage
 
-1. **Select code** in visual mode
-2. **Exit visual mode** (press `Esc`) - selection is captured
-3. **Open Claude terminal** with `<leader>cc`
-4. **Ask Claude** to modify your selection (e.g., "add error handling to @selection")
-5. **Review the diff** that appears
-6. **Accept** with `:w` or **reject** by closing the buffer
-
-## How It Works
-
-The plugin creates a WebSocket server that Claude Code CLI connects to. When you:
-
-- **Select code**: The selection is tracked and can be referenced as `@selection` in Claude
-- **Ask for changes**: Claude calls the `openDiff` tool to show proposed changes
-- **Accept/Reject**: Your decision is sent back to Claude Code
-
-### Lock File
-
-The plugin creates a lock file at `~/.claude/ide/<port>.lock` so Claude Code CLI can discover and connect to it automatically.
+1. Press `<leader>cs` (or `:ClaudeInlineSend`) to open the prompt input
+2. Type your question and press `Enter`
+3. Response appears in the sidebar with streaming
+4. Send follow-up questions - Claude remembers context
+5. Press `<leader>cx` (or `:ClaudeInlineClear`) to start a new conversation
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `:lua require("claude-inline").toggle_terminal()` | Toggle Claude terminal |
-| `:lua require("claude-inline").start()` | Start WebSocket server |
-| `:lua require("claude-inline").stop()` | Stop WebSocket server |
-| `:lua require("claude-inline").get_status()` | Get server status |
+| `:ClaudeInlineSend` | Open input prompt |
+| `:ClaudeInlineToggle` | Toggle sidebar visibility |
+| `:ClaudeInlineClear` | Clear conversation and restart |
 
-## Troubleshooting
+## How It Works
 
-### Claude Code not connecting
+The plugin spawns a single Claude Code CLI process with `--input-format stream-json --output-format stream-json`. This keeps the conversation context in memory, so follow-up questions work naturally without re-sending history.
 
-1. Check the lock file exists: `ls ~/.claude/ide/`
-2. Verify server is running: `:lua print(require("claude-inline").is_running())`
-3. Check the port: `:lua print(require("claude-inline").get_status().port)`
+Messages are sent as NDJSON:
+```json
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"your prompt"}]}}
+```
 
-### Selection not appearing in Claude
-
-1. Make sure you exit visual mode after selecting (press `Esc`)
-2. The selection is stored when you exit visual mode, not while selecting
+Claude responds with streaming chunks (`type: "assistant"`) followed by a final result (`type: "result"`).
 
 ## License
 

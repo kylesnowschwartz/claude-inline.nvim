@@ -1,294 +1,161 @@
-local config = require 'claude-inline.config'
-local ui = require 'claude-inline.ui'
-local base = require 'claude-inline.base'
-local autocmd = require 'claude-inline.autocmd'
-local lockfile = require 'claude-inline.lockfile'
-local websocket = require 'claude-inline.websocket'
-local terminal = require 'claude-inline.terminal'
-local tools = require 'claude-inline.tools'
-local client_manager = require 'claude-inline.websocket.client'
-
+--- claude-inline.nvim - Minimal Claude chat in Neovim
+--- Send prompts to Claude CLI with persistent conversation context
 local M = {}
 
--- Initialize global table for deferred responses (coroutine-based blocking tools)
-_G.claude_deferred_responses = _G.claude_deferred_responses or {}
+local config = require 'claude-inline.config'
+local client = require 'claude-inline.client'
+local ui = require 'claude-inline.ui'
 
----Send a JSON-RPC response to a client
----@param client table The WebSocket client
----@param id number|string|nil The request ID
----@param result table|nil The result (for success)
----@param err table|nil The error (for failure)
-local function send_response(client, id, result, err)
-  local response = {
-    jsonrpc = '2.0',
-    id = id,
-  }
+M._state = {
+  initialized = false,
+  streaming_text = '',
+}
 
-  if err then
-    response.error = err
-  else
-    response.result = result
-  end
+--- Handle incoming messages from Claude CLI
+---@param msg table
+local function handle_message(msg)
+  local msg_type = msg.type
 
-  local json = vim.json.encode(response)
-  client_manager.send_message(client, json)
-end
-
----Handle JSON-RPC messages from Claude Code
----@param client table The WebSocket client
----@param message table Parsed JSON-RPC message
-local function handle_jsonrpc(client, message)
-  local method = message.method
-  local id = message.id
-  local params = message.params or {}
-
-  -- tools/list - Return available tools
-  if method == 'tools/list' then
-    local tool_list = tools.get_tool_list()
-    send_response(client, id, { tools = tool_list }, nil)
+  if msg_type == 'system' then
+    -- Ignore system/hook messages
     return
   end
 
-  -- tools/call - Execute a tool
-  if method == 'tools/call' then
-    local result = tools.handle_invoke(client, params)
+  if msg_type == 'assistant' then
+    -- Stop spinner immediately when we get content
+    ui.hide_loading()
 
-    -- Check for deferred response (blocking tool like openDiff)
-    if result._deferred then
-      -- Store response sender for when coroutine resumes
-      local co_key = tostring(result.coroutine)
-      _G.claude_deferred_responses[co_key] = function(final_result)
-        vim.schedule(function()
-          if final_result.error then
-            send_response(client, id, nil, final_result.error)
-          else
-            send_response(client, id, final_result.result or final_result, nil)
-          end
-        end)
+    local content = msg.message and msg.message.content
+    if content then
+      for _, block in ipairs(content) do
+        if block.type == 'text' then
+          M._state.streaming_text = M._state.streaming_text .. (block.text or '')
+          ui.update_last_message(M._state.streaming_text)
+        end
       end
+    end
+    return
+  end
+
+  if msg_type == 'result' then
+    -- Final result
+    ui.hide_loading()
+
+    local result_text = msg.result
+    if result_text and result_text ~= '' then
+      -- If we have streamed content, it's already shown
+      -- If not, show the result
+      if M._state.streaming_text == '' then
+        ui.update_last_message(result_text)
+      end
+    end
+
+    M._state.streaming_text = ''
+    return
+  end
+end
+
+--- Handle errors from Claude CLI
+---@param err string
+local function handle_error(err)
+  ui.hide_loading()
+  vim.notify('Claude error: ' .. err, vim.log.levels.ERROR)
+end
+
+--- Send a prompt to Claude
+---@param prompt string
+function M.send(prompt)
+  if not M._state.initialized then
+    vim.notify('Claude Inline not initialized. Call setup() first.', vim.log.levels.ERROR)
+    return
+  end
+
+  -- Make sure sidebar is visible
+  ui.show_sidebar()
+
+  -- Add user message to chat
+  ui.append_message('user', prompt)
+
+  -- Reset streaming state
+  M._state.streaming_text = ''
+
+  -- Start client if needed
+  if not client.is_running() then
+    local ok = client.start(handle_message, handle_error)
+    if not ok then
+      vim.notify('Failed to start Claude process', vim.log.levels.ERROR)
       return
     end
-
-    -- Immediate response
-    if result.error then
-      send_response(client, id, nil, result.error)
-    else
-      send_response(client, id, result.result, nil)
-    end
-    return
   end
 
-  -- Unknown method
-  send_response(client, id, nil, {
-    code = -32601,
-    message = 'Method not found: ' .. (method or 'nil'),
-  })
+  -- Show loading and send
+  ui.show_loading()
+  client.send(prompt)
 end
 
+--- Show input prompt and send on submit
+function M.prompt()
+  ui.show_input(function(input)
+    if input then
+      M.send(input)
+    end
+  end)
+end
+
+--- Toggle sidebar visibility
+function M.toggle()
+  ui.toggle_sidebar()
+end
+
+--- Clear conversation and restart Claude process
+function M.clear()
+  ui.clear()
+  client.stop()
+  M._state.streaming_text = ''
+end
+
+--- Setup the plugin
+---@param opts? table User configuration
 function M.setup(opts)
-  config.setup(opts or {})
-  ui.setup()
-  autocmd.setup()
-  base.setup()
-  tools.setup()
-end
+  local cfg = config.setup(opts)
 
----Start the WebSocket server and create lock file
----@param opts table|nil Optional settings: { on_message, on_connect, on_disconnect, on_error }
----@return boolean success Whether server started successfully
----@return string|nil error Error message if failed
-function M.start(opts)
-  opts = opts or {}
+  client.setup(cfg)
+  ui.setup(cfg)
 
-  if websocket.is_running() then
-    vim.notify('Server already running on port ' .. websocket.get_port(), vim.log.levels.WARN)
-    return false, 'Server already running'
+  M._state.initialized = true
+
+  -- Create user commands
+  vim.api.nvim_create_user_command('ClaudeInlineSend', function()
+    M.prompt()
+  end, { desc = 'Send prompt to Claude' })
+
+  vim.api.nvim_create_user_command('ClaudeInlineToggle', function()
+    M.toggle()
+  end, { desc = 'Toggle Claude chat sidebar' })
+
+  vim.api.nvim_create_user_command('ClaudeInlineClear', function()
+    M.clear()
+  end, { desc = 'Clear Claude conversation' })
+
+  -- Setup keymaps
+  local keymaps = cfg.keymaps
+  if keymaps.send then
+    vim.keymap.set('n', keymaps.send, M.prompt, { desc = 'Send to Claude' })
+  end
+  if keymaps.toggle then
+    vim.keymap.set('n', keymaps.toggle, M.toggle, { desc = 'Toggle Claude sidebar' })
+  end
+  if keymaps.clear then
+    vim.keymap.set('n', keymaps.clear, M.clear, { desc = 'Clear Claude conversation' })
   end
 
-  -- Generate auth token
-  local auth_token = lockfile.generate_auth_token()
-
-  -- Start the WebSocket server
-  local success, port_or_error = websocket.start {
-    auth_token = auth_token,
-    on_message = function(client, message)
-      -- Parse JSON-RPC message
-      local ok, parsed = pcall(vim.json.decode, message)
-      if ok then
-        -- Route through MCP handler
-        vim.schedule(function()
-          handle_jsonrpc(client, parsed)
-        end)
-        -- Also call user callback if provided
-        if opts.on_message then
-          opts.on_message(client, parsed)
-        end
-      end
+  -- Cleanup on Neovim exit
+  vim.api.nvim_create_autocmd('VimLeavePre', {
+    callback = function()
+      client.stop()
+      ui.cleanup()
     end,
-    on_connect = function(client)
-      vim.schedule(function()
-        vim.notify('Claude Code connected (client: ' .. client.id .. ')', vim.log.levels.INFO)
-        if opts.on_connect then
-          opts.on_connect(client)
-        end
-      end)
-    end,
-    on_disconnect = function(client, code, reason)
-      vim.schedule(function()
-        vim.notify('Claude Code disconnected: ' .. (reason or 'closed'), vim.log.levels.INFO)
-        if opts.on_disconnect then
-          opts.on_disconnect(client, code, reason)
-        end
-      end)
-    end,
-    on_error = function(err)
-      vim.schedule(function()
-        vim.notify('WebSocket error: ' .. err, vim.log.levels.ERROR)
-        if opts.on_error then
-          opts.on_error(err)
-        end
-      end)
-    end,
-  }
-
-  if not success then
-    vim.notify('Failed to start server: ' .. port_or_error, vim.log.levels.ERROR)
-    return false, port_or_error
-  end
-
-  local port = port_or_error
-
-  -- Create lock file for Claude Code to discover us
-  local lock_success, lock_result, _ = lockfile.create(port, auth_token)
-  if not lock_success then
-    websocket.stop()
-    vim.notify('Failed to create lock file: ' .. lock_result, vim.log.levels.ERROR)
-    return false, lock_result
-  end
-
-  vim.notify('Server started on port ' .. port .. ' (lock file: ' .. lock_result .. ')', vim.log.levels.INFO)
-  return true, nil
-end
-
----Stop the WebSocket server and remove lock file
-function M.stop()
-  if not websocket.is_running() then
-    vim.notify('Server not running', vim.log.levels.WARN)
-    return
-  end
-
-  local port = websocket.get_port()
-
-  -- Remove lock file first
-  if port then
-    lockfile.remove(port)
-  end
-
-  -- Stop server
-  websocket.stop()
-
-  vim.notify('Server stopped', vim.log.levels.INFO)
-end
-
----Check if server is running
----@return boolean running True if server is running
-function M.is_running()
-  return websocket.is_running()
-end
-
----Get server status
----@return table status Server status information
-function M.get_status()
-  return websocket.get_status()
-end
-
----Send a JSON-RPC notification to all connected clients
----@param method string The method name
----@param params table|nil The parameters
-function M.broadcast(method, params)
-  if not websocket.is_running() then
-    return
-  end
-
-  local message = vim.json.encode {
-    jsonrpc = '2.0',
-    method = method,
-    params = params or vim.empty_dict(),
-  }
-
-  websocket.broadcast(message)
-end
-
----Find a running Claude Code instance (other IDEs' servers)
----For debugging/introspection, not for connecting
----@return table|nil info { port, auth_token, workspace_folders } or nil if none found
-function M.find_claude()
-  local info, err = lockfile.get_connection_info_for_workspace()
-
-  if not info then
-    vim.notify('No Claude Code instance found: ' .. (err or 'unknown error'), vim.log.levels.WARN)
-    return nil
-  end
-
-  return info
-end
-
----List all running Claude Code instances (other IDEs' servers)
----@return table instances Array of instance info
-function M.list_claude_instances()
-  return lockfile.find_claude_instances()
-end
-
----Open the Claude terminal sidebar
----Auto-starts the WebSocket server if not already running
-function M.open_terminal()
-  -- Auto-start server if not running
-  if not websocket.is_running() then
-    local success, err = M.start()
-    if not success then
-      vim.notify('Failed to start server for terminal: ' .. (err or 'unknown error'), vim.log.levels.ERROR)
-      return
-    end
-  end
-
-  local port = websocket.get_port()
-  if not port then
-    vim.notify('Server port not available', vim.log.levels.ERROR)
-    return
-  end
-
-  terminal.open(port, true)
-end
-
----Close the Claude terminal sidebar
-function M.close_terminal()
-  terminal.close()
-end
-
----Toggle the Claude terminal sidebar visibility
-function M.toggle_terminal()
-  -- Auto-start server if not running
-  if not websocket.is_running() then
-    local success, err = M.start()
-    if not success then
-      vim.notify('Failed to start server for terminal: ' .. (err or 'unknown error'), vim.log.levels.ERROR)
-      return
-    end
-  end
-
-  local port = websocket.get_port()
-  if not port then
-    vim.notify('Server port not available', vim.log.levels.ERROR)
-    return
-  end
-
-  terminal.toggle(port)
-end
-
----Check if the Claude terminal is open
----@return boolean is_open True if terminal is visible
-function M.is_terminal_open()
-  return terminal.is_open()
+  })
 end
 
 return M

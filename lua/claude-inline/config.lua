@@ -1,23 +1,50 @@
---- Configuration for Claude Code inline editing.
+--- Configuration management for claude-inline.nvim
 local M = {}
 
-M.mappings = {
-  open_input = '<leader>e',
-  accept_response = '<leader>y',
-  deny_response = '<leader>n',
-  toggle_terminal = '<leader>cc',
+--- Default configuration
+M.defaults = {
+  keymaps = {
+    send = '<leader>cs', -- Send prompt
+    toggle = '<leader>ct', -- Toggle sidebar
+    clear = '<leader>cx', -- Clear conversation
+  },
+  ui = {
+    sidebar = {
+      position = 'right', -- 'left' or 'right'
+      width = 0.4, -- 40% of editor width
+    },
+    input = {
+      border = 'rounded',
+      width = 60,
+      height = 3,
+    },
+    loading = {
+      text = 'Thinking...',
+      spinner = { '|', '/', '-', '\\' },
+      interval = 100,
+    },
+  },
+  claude = {
+    command = 'claude',
+    args = { '-p', '--input-format', 'stream-json', '--output-format', 'stream-json' },
+  },
 }
 
-M.provider = {
-  name = 'claude',
-  model = 'claude-sonnet-4-20250514',
-}
+--- Active configuration (set after setup)
+M.options = {}
 
-M.setup = function(opts)
-  local provider = opts.provider or {}
-  local mappings = opts.mappings or {}
-  M.provider = vim.tbl_deep_extend('force', M.provider, provider)
-  M.mappings = vim.tbl_deep_extend('force', M.mappings, mappings)
+--- Merge user config with defaults
+---@param user_config? table
+---@return table
+function M.setup(user_config)
+  M.options = vim.tbl_deep_extend('force', M.defaults, user_config or {})
+  return M.options
+end
+
+--- Get current config
+---@return table
+function M.get()
+  return M.options
 end
 
 return M

@@ -1,12 +1,6 @@
-if vim.g.loaded_ai_companion then
+-- claude-inline.nvim plugin loader
+-- Loaded automatically by Neovim when plugin is installed
+if vim.g.loaded_claude_inline then
   return
 end
-
-vim.g.loaded_ai_companion = true
-
-local ok, ai_companion = pcall(require, "claude-inline")
-if not ok then
-  return
-end
-
-ai_companion.setup()
+vim.g.loaded_claude_inline = true
