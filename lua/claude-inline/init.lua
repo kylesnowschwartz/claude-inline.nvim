@@ -5,6 +5,7 @@ local M = {}
 local config = require 'claude-inline.config'
 local client = require 'claude-inline.client'
 local ui = require 'claude-inline.ui'
+local selection = require 'claude-inline.selection'
 
 M._state = {
   initialized = false,
@@ -102,6 +103,28 @@ function M.prompt()
   end)
 end
 
+--- Show input prompt with visual selection context
+function M.prompt_with_selection()
+  -- Capture selection while still in visual mode
+  local sel = selection.capture()
+
+  -- Now exit visual mode
+  vim.cmd('normal! ' .. vim.api.nvim_replace_termcodes('<Esc>', true, false, true))
+
+  if not sel then
+    vim.notify('No text selected', vim.log.levels.WARN)
+    return
+  end
+
+  local context = selection.format_context(sel)
+
+  ui.show_input(function(input)
+    if input then
+      M.send(context .. input)
+    end
+  end)
+end
+
 --- Toggle sidebar visibility
 function M.toggle()
   ui.toggle_sidebar()
@@ -141,6 +164,7 @@ function M.setup(opts)
   local keymaps = cfg.keymaps
   if keymaps.send then
     vim.keymap.set('n', keymaps.send, M.prompt, { desc = 'Send to Claude' })
+    vim.keymap.set('v', keymaps.send, M.prompt_with_selection, { desc = 'Send selection to Claude' })
   end
   if keymaps.toggle then
     vim.keymap.set('n', keymaps.toggle, M.toggle, { desc = 'Toggle Claude sidebar' })

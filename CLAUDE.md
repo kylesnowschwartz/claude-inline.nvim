@@ -17,10 +17,11 @@ lua/claude-inline/
 ├── init.lua      # Entry point, commands, keymaps, message routing
 ├── client.lua    # Claude process lifecycle, NDJSON parsing
 ├── ui.lua        # Sidebar split, floating input, loading spinner
+├── selection.lua # Visual mode capture with proper mode handling
 └── config.lua    # Defaults and user config merge
 ```
 
-**Total: ~400 lines of Lua, zero external dependencies.**
+**Total: ~500 lines of Lua, zero external dependencies.**
 
 ## How It Works
 
@@ -76,11 +77,12 @@ Lua arrays are 1-indexed, `nvim_buf_set_lines` is 0-indexed. The code exploits t
 
 ## Commands & Keymaps
 
-| Command | Default Key | Action |
-|---------|-------------|--------|
-| `:ClaudeInlineSend` | `<leader>cs` | Open floating input prompt |
-| `:ClaudeInlineToggle` | `<leader>ct` | Toggle sidebar visibility |
-| `:ClaudeInlineClear` | `<leader>cx` | Clear conversation, restart Claude process |
+| Command | Default Key | Mode | Action |
+|---------|-------------|------|--------|
+| `:ClaudeInlineSend` | `<leader>cs` | Normal | Open floating input prompt |
+| `:ClaudeInlineSend` | `<leader>cs` | Visual | Send selection with prompt (includes filepath:lines context) |
+| `:ClaudeInlineToggle` | `<leader>ct` | Normal | Toggle sidebar visibility |
+| `:ClaudeInlineClear` | `<leader>cx` | Normal | Clear conversation, restart Claude process |
 
 ## Configuration
 
@@ -109,11 +111,33 @@ No automated tests yet. Manual verification:
 
 ## Future Ideas
 
-- Visual selection context (send `@selection` with prompts)
-- Auto-include current buffer filename/filetype
 - Syntax highlighting in sidebar (treesitter markdown)
 - Keybind to yank Claude's last response
 - Conversation history persistence across sessions
+
+## Reference Implementations
+
+**Before implementing new features, check `.cloned-sources/` for existing patterns.**
+
+```
+.cloned-sources/
+├── avante.nvim/       # Popular AI chat plugin
+├── claude-inline.nvim/ # Reference inline editing implementation
+└── claudecode.nvim/   # Official Claude Code Neovim integration
+```
+
+These repos contain battle-tested solutions for common problems:
+- **Visual selection handling**: See `selection.lua` in both claude-inline.nvim and claudecode.nvim
+- **Terminal integration**: claudecode.nvim has comprehensive terminal management
+- **WebSocket/MCP protocol**: claudecode.nvim implements full MCP compliance
+
+**Research pattern:**
+1. Identify the feature area (e.g., "visual selection")
+2. `rg "visual.*selection|getpos" .cloned-sources/` to find relevant files
+3. Read the implementations, understand the patterns
+4. Adapt to this plugin's simpler architecture
+
+Don't reinvent solutions that already exist in the reference implementations.
 
 ## Development Commands
 
