@@ -100,6 +100,7 @@ The fold markers are vim-style (`{{{`/`}}}`) with `foldmethod=marker` on the buf
 | `:ClaudeInlineToggle` | `<leader>ct` | Normal | Toggle sidebar visibility |
 | `:ClaudeInlineClear` | `<leader>cx` | Normal | Clear conversation, restart Claude process |
 | `:ClaudeInlineDebug on\|off` | - | Normal | Toggle debug logging |
+| `:checkhealth claude-inline` | - | Normal | Verify Claude CLI and dependencies |
 
 ## Configuration
 
