@@ -19,7 +19,7 @@ M._state = {
   stdout = nil,
   stderr = nil,
   process = nil,
-  buffer = '',
+  buffer = "",
   on_message = nil,
   on_error = nil,
   config = nil,
@@ -48,14 +48,14 @@ function M.start(on_message, on_error)
 
   M._state.on_message = on_message
   M._state.on_error = on_error
-  M._state.buffer = ''
+  M._state.buffer = ""
 
   local stdin = uv.new_pipe(false)
   local stdout = uv.new_pipe(false)
   local stderr = uv.new_pipe(false)
 
   if not stdin or not stdout or not stderr then
-    on_error 'Failed to create pipes'
+    on_error("Failed to create pipes")
     return false
   end
 
@@ -70,7 +70,7 @@ function M.start(on_message, on_error)
     vim.schedule(function()
       M._cleanup()
       if code ~= 0 then
-        local err = string.format('Claude process exited with code %d (signal %d)', code, signal)
+        local err = string.format("Claude process exited with code %d (signal %d)", code, signal)
         if M._state.on_error then
           M._state.on_error(err)
         end
@@ -82,7 +82,7 @@ function M.start(on_message, on_error)
     stdin:close()
     stdout:close()
     stderr:close()
-    on_error 'Failed to spawn Claude process'
+    on_error("Failed to spawn Claude process")
     return false
   end
 
@@ -96,7 +96,7 @@ function M.start(on_message, on_error)
     if err then
       vim.schedule(function()
         if M._state.on_error then
-          M._state.on_error('stdout error: ' .. err)
+          M._state.on_error("stdout error: " .. err)
         end
       end)
       return
@@ -106,12 +106,12 @@ function M.start(on_message, on_error)
       M._state.buffer = M._state.buffer .. data
 
       -- Split on newlines and process complete JSON messages
-      local lines = vim.split(M._state.buffer, '\n', { plain = true })
+      local lines = vim.split(M._state.buffer, "\n", { plain = true })
       M._state.buffer = lines[#lines] -- Keep incomplete line in buffer
 
       for i = 1, #lines - 1 do
         local line = vim.trim(lines[i])
-        if line ~= '' then
+        if line ~= "" then
           local ok, msg = pcall(vim.json.decode, line)
           if ok and M._state.on_message then
             vim.schedule(function()
@@ -128,8 +128,8 @@ function M.start(on_message, on_error)
     if data and M._state.on_error then
       vim.schedule(function()
         -- Only report actual errors, not debug info
-        if data:match 'error' or data:match 'Error' then
-          M._state.on_error('stderr: ' .. data)
+        if data:match("error") or data:match("Error") then
+          M._state.on_error("stderr: " .. data)
         end
       end)
     end
@@ -148,17 +148,17 @@ function M.send(prompt)
 
   -- Format message according to stream-json protocol
   local message = {
-    type = 'user',
+    type = "user",
     message = {
-      role = 'user',
+      role = "user",
       content = {
-        { type = 'text', text = prompt },
+        { type = "text", text = prompt },
       },
     },
   }
 
   local json = vim.json.encode(message)
-  M._state.stdin:write(json .. '\n')
+  M._state.stdin:write(json .. "\n")
   return true
 end
 
@@ -189,7 +189,7 @@ function M._cleanup()
   M._state.stdout = nil
   M._state.stderr = nil
   M._state.process = nil
-  M._state.buffer = ''
+  M._state.buffer = ""
 end
 
 return M

@@ -80,7 +80,7 @@ local function get_block_selection(bufnr, start_line, start_col, end_line, end_c
     local byte_end = vim.fn.byteidx(line, end_col + 1)
 
     if byte_start == -1 then
-      table.insert(result, '')
+      table.insert(result, "")
     else
       if byte_end == -1 then
         byte_end = #line
@@ -97,10 +97,10 @@ end
 ---@return Selection|nil
 function M.capture()
   local mode = vim.fn.visualmode()
-  if mode == '' then
+  if mode == "" then
     -- Try current mode if visualmode() returns empty
     local current = vim.api.nvim_get_mode().mode
-    if current == 'v' or current == 'V' or current == '\22' then
+    if current == "v" or current == "V" or current == "\22" then
       mode = current
     else
       return nil
@@ -108,7 +108,7 @@ function M.capture()
   end
 
   -- Get selection bounds using 'v' mark (anchor) and cursor position
-  local anchor = vim.fn.getpos 'v'
+  local anchor = vim.fn.getpos("v")
   local cursor = vim.api.nvim_win_get_cursor(0)
 
   local p1 = { line = anchor[2], col = anchor[3] - 1 }
@@ -127,10 +127,10 @@ function M.capture()
   local bufnr = vim.api.nvim_get_current_buf()
   local lines
 
-  if mode == 'V' then
+  if mode == "V" then
     -- Line-wise: full lines
     lines = vim.api.nvim_buf_get_lines(bufnr, start_line - 1, end_line, false)
-  elseif mode == '\22' then
+  elseif mode == "\22" then
     -- Block-wise
     lines = get_block_selection(bufnr, start_line, start_col, end_line, end_col)
   else
@@ -143,7 +143,7 @@ function M.capture()
   end
 
   return {
-    text = table.concat(lines, '\n'),
+    text = table.concat(lines, "\n"),
     filepath = vim.api.nvim_buf_get_name(bufnr),
     filetype = vim.bo[bufnr].filetype,
     start_line = start_line,
@@ -157,18 +157,18 @@ end
 ---@return string
 function M.format_context(sel)
   local header
-  if sel.filepath ~= '' then
+  if sel.filepath ~= "" then
     if sel.start_line == sel.end_line then
-      header = string.format('%s:%d', sel.filepath, sel.start_line)
+      header = string.format("%s:%d", sel.filepath, sel.start_line)
     else
-      header = string.format('%s:%d-%d', sel.filepath, sel.start_line, sel.end_line)
+      header = string.format("%s:%d-%d", sel.filepath, sel.start_line, sel.end_line)
     end
   else
-    header = '[scratch buffer]'
+    header = "[scratch buffer]"
   end
 
-  local fence_lang = sel.filetype ~= '' and sel.filetype or ''
-  return header .. '\n```' .. fence_lang .. '\n' .. sel.text .. '\n```\n\n'
+  local fence_lang = sel.filetype ~= "" and sel.filetype or ""
+  return header .. "\n```" .. fence_lang .. "\n" .. sel.text .. "\n```\n\n"
 end
 
 return M
