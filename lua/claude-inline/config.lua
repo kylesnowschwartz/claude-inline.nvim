@@ -49,10 +49,4 @@ function M.setup(user_config)
   return M.options
 end
 
---- Get current config
----@return table
-function M.get()
-  return M.options
-end
-
 return M

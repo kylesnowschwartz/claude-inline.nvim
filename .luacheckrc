@@ -1,4 +1,4 @@
--- Luacheck configuration for cursor-inline.nvim
+-- Luacheck configuration for claude-inline.nvim
 -- Neovim plugin development
 
 -- Globals provided by Neovim

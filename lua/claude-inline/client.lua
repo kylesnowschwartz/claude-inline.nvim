@@ -63,7 +63,7 @@ function M.start(on_message, on_error)
   local args = vim.deepcopy(config.args or {})
 
   -- Inherit full environment (needed for Claude auth, HOME, etc.)
-  local handle, pid = uv.spawn(config.command, {
+  local handle, _ = uv.spawn(config.command, {
     args = args,
     stdio = { stdin, stdout, stderr },
   }, function(code, signal)
