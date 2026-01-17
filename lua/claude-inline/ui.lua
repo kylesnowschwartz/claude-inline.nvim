@@ -61,6 +61,9 @@ function M.show_sidebar()
     vim.api.nvim_set_option_value('swapfile', false, { buf = M._state.sidebar_buf })
     vim.api.nvim_buf_set_name(M._state.sidebar_buf, 'Claude Chat')
     vim.api.nvim_set_option_value('filetype', 'markdown', { buf = M._state.sidebar_buf })
+
+    -- Enable treesitter highlighting (doesn't auto-activate on scratch buffers)
+    pcall(vim.treesitter.start, M._state.sidebar_buf, 'markdown')
   end
 
   -- Calculate width
