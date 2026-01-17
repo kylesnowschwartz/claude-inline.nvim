@@ -6,11 +6,6 @@ globals = {
   "vim",
 }
 
--- Read-only globals
-read_globals = {
-  "vim",
-}
-
 -- Ignore these warnings
 ignore = {
   "212", -- unused argument (common in callbacks)

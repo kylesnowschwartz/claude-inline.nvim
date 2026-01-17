@@ -4,6 +4,13 @@ local M = {}
 
 local uv = vim.uv or vim.loop
 
+-- Namespace for message block extmarks
+local MESSAGE_NS = vim.api.nvim_create_namespace 'claude_inline_messages'
+
+---@class MessageBlock
+---@field id number Extmark ID
+---@field role 'user'|'assistant'
+
 ---@class UIState
 ---@field sidebar_win number|nil
 ---@field sidebar_buf number|nil
@@ -15,6 +22,7 @@ local uv = vim.uv or vim.loop
 ---@field thinking_start_line number|nil Line where thinking section starts
 ---@field thinking_active boolean Whether currently streaming thinking
 ---@field response_start_line number|nil Line where response text starts (after thinking)
+---@field message_blocks MessageBlock[] Array of message blocks with extmark IDs
 
 M._state = {
   sidebar_win = nil,
@@ -27,6 +35,7 @@ M._state = {
   thinking_start_line = nil,
   thinking_active = false,
   response_start_line = nil,
+  message_blocks = {},
 }
 
 -- Helper functions to reduce duplication
@@ -47,18 +56,6 @@ local function with_modifiable(fn)
   return result
 end
 
---- Find the line number of the last Claude marker
----@param lines string[] Buffer lines
----@return number|nil Line number (1-indexed) or nil if not found
-local function find_last_claude_marker(lines)
-  for i = #lines, 1, -1 do
-    if lines[i]:match '^%*%*Claude:%*%*' then
-      return i
-    end
-  end
-  return nil
-end
-
 --- Scroll sidebar window to bottom if visible
 local function scroll_to_bottom()
   if M.is_sidebar_open() then
@@ -74,6 +71,18 @@ local function close_input(win)
   M._state.input_win = nil
   M._state.input_buf = nil
   vim.cmd 'stopinsert'
+end
+
+--- Create an extmark to track a message block boundary
+---@param role 'user'|'assistant'
+---@param start_line number 0-indexed line where message starts
+---@return number extmark_id
+local function create_message_extmark(role, start_line)
+  local mark_id = vim.api.nvim_buf_set_extmark(M._state.sidebar_buf, MESSAGE_NS, start_line, 0, {
+    right_gravity = false, -- Stays put when text inserted at this position
+  })
+  table.insert(M._state.message_blocks, { id = mark_id, role = role })
+  return mark_id
 end
 
 --- Setup UI module with configuration
@@ -170,6 +179,7 @@ end
 function M.append_message(role, text)
   local prefix = role == 'user' and '**You:**' or '**Claude:**'
   local lines = vim.split(prefix .. '\n' .. text .. '\n\n', '\n', { plain = true })
+  local start_line
 
   with_modifiable(function()
     local line_count = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
@@ -177,12 +187,15 @@ function M.append_message(role, text)
 
     -- If buffer is empty (just one empty line), replace it
     if line_count == 1 and last_line == '' then
+      start_line = 0
       vim.api.nvim_buf_set_lines(M._state.sidebar_buf, 0, 1, false, lines)
     else
+      start_line = line_count -- 0-indexed: next line after current content
       vim.api.nvim_buf_set_lines(M._state.sidebar_buf, -1, -1, false, lines)
     end
   end)
 
+  create_message_extmark(role, start_line)
   scroll_to_bottom()
 end
 
@@ -199,20 +212,28 @@ function M.update_last_message(text)
   if M._state.response_start_line then
     start_line = M._state.response_start_line
   else
-    -- Find the last "**Claude:**" marker and replace everything after it
-    local lines = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, 0, -1, false)
-    start_line = find_last_claude_marker(lines)
+    -- Get last assistant block via extmarks
+    local last_block = M._state.message_blocks[#M._state.message_blocks]
+    if not last_block or last_block.role ~= 'assistant' then
+      return
+    end
+
+    local mark = vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, last_block.id, {})
+    if not mark or #mark == 0 then
+      return
+    end
+
+    -- Content starts after header line (mark[1] is 0-indexed row)
+    start_line = mark[1] + 1
   end
 
-  if start_line then
-    local new_lines = vim.split(text .. '\n', '\n', { plain = true })
+  local new_lines = vim.split(text .. '\n', '\n', { plain = true })
 
-    with_modifiable(function()
-      vim.api.nvim_buf_set_lines(M._state.sidebar_buf, start_line, -1, false, new_lines)
-    end)
+  with_modifiable(function()
+    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, start_line, -1, false, new_lines)
+  end)
 
-    scroll_to_bottom()
-  end
+  scroll_to_bottom()
 end
 
 --- Start a thinking section in the sidebar
@@ -222,24 +243,32 @@ function M.show_thinking()
     return
   end
 
-  -- Track where thinking starts
-  M._state.thinking_start_line = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
   M._state.thinking_active = true
 
   -- Insert thinking header with fold marker (replaces the loading spinner)
   local header = '> *Thinking...* {{{'
 
-  -- Find Claude marker and insert thinking section after it
-  local lines = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, 0, -1, false)
-  local claude_line = find_last_claude_marker(lines)
-
-  if claude_line then
-    with_modifiable(function()
-      -- Replace everything after Claude: with thinking header
-      vim.api.nvim_buf_set_lines(M._state.sidebar_buf, claude_line, -1, false, { header })
-    end)
-    M._state.thinking_start_line = claude_line + 1 -- Line after the header
+  -- Find last assistant block via extmarks
+  local last_block = M._state.message_blocks[#M._state.message_blocks]
+  if not last_block or last_block.role ~= 'assistant' then
+    return
   end
+
+  local mark = vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, last_block.id, {})
+  if not mark or #mark == 0 then
+    return
+  end
+
+  -- mark[1] is 0-indexed row where **Claude:** header is
+  local header_row = mark[1]
+
+  with_modifiable(function()
+    -- Replace everything after Claude: header with thinking header
+    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, header_row + 1, -1, false, { header })
+  end)
+
+  -- Thinking content starts after the thinking header line
+  M._state.thinking_start_line = header_row + 2
 end
 
 --- Update thinking content (streaming)
@@ -319,6 +348,12 @@ end
 
 --- Clear the conversation buffer
 function M.clear()
+  -- Clear extmarks and reset block tracking
+  if M._state.sidebar_buf and vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
+    vim.api.nvim_buf_clear_namespace(M._state.sidebar_buf, MESSAGE_NS, 0, -1)
+  end
+  M._state.message_blocks = {}
+
   with_modifiable(function()
     vim.api.nvim_buf_set_lines(M._state.sidebar_buf, 0, -1, false, {})
   end)
@@ -327,6 +362,46 @@ function M.clear()
   M._state.thinking_start_line = nil
   M._state.thinking_active = false
   M._state.response_start_line = nil
+end
+
+--- Get the message block at cursor position
+---@return MessageBlock|nil
+function M.get_block_at_cursor()
+  if not M.is_sidebar_open() then
+    return nil
+  end
+
+  local cursor = vim.api.nvim_win_get_cursor(M._state.sidebar_win)
+  local cursor_line = cursor[1] - 1 -- Convert to 0-indexed
+  local line_count = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
+
+  -- With point extmarks, block end = next block's start (or buffer end)
+  for i, block in ipairs(M._state.message_blocks) do
+    local mark = vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, block.id, {})
+    if mark and #mark >= 1 then
+      local start_row = mark[1]
+      local end_row
+
+      -- End is either next block's start or buffer end
+      if i < #M._state.message_blocks then
+        local next_mark = vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, M._state.message_blocks[i + 1].id, {})
+        end_row = next_mark and next_mark[1] - 1 or line_count - 1
+      else
+        end_row = line_count - 1
+      end
+
+      if cursor_line >= start_row and cursor_line <= end_row then
+        return block
+      end
+    end
+  end
+  return nil
+end
+
+--- Get all message blocks in the conversation
+---@return MessageBlock[]
+function M.get_all_blocks()
+  return vim.deepcopy(M._state.message_blocks)
 end
 
 --- Show input prompt window
@@ -451,6 +526,7 @@ function M.cleanup()
   M._state.thinking_start_line = nil
   M._state.thinking_active = false
   M._state.response_start_line = nil
+  M._state.message_blocks = {}
 end
 
 return M

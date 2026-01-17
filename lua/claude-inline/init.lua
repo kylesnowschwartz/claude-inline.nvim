@@ -214,10 +214,10 @@ function M.setup(opts)
     M.clear()
   end, { desc = 'Clear Claude conversation' })
 
-  vim.api.nvim_create_user_command('ClaudeInlineDebug', function(opts)
-    if opts.args == 'on' then
+  vim.api.nvim_create_user_command('ClaudeInlineDebug', function(cmd)
+    if cmd.args == 'on' then
       debug.enable()
-    elseif opts.args == 'off' then
+    elseif cmd.args == 'off' then
       debug.disable()
     else
       vim.notify('Usage: ClaudeInlineDebug on|off', vim.log.levels.INFO)

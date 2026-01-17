@@ -63,6 +63,21 @@ require("claude-inline").setup({
 4. Send follow-up questions - Claude remembers context
 5. Press `<leader>cx` (or `:ClaudeInlineClear`) to start a new conversation
 
+### Visual Selection
+
+Select code in visual mode, then press `<leader>cs`. The floating input opens for your prompt, and the selected code is automatically included with file path and line numbers:
+
+```
+From main.lua:15-23:
+local function example()
+  -- your selected code
+end
+
+What does this function do?
+```
+
+This gives Claude the context it needs without you having to copy-paste or explain where the code lives.
+
 ## Commands
 
 | Command | Description |
