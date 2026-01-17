@@ -9,7 +9,8 @@ local MESSAGE_NS = vim.api.nvim_create_namespace 'claude_inline_messages'
 
 ---@class MessageBlock
 ---@field id number Extmark ID
----@field role 'user'|'assistant'
+---@field role 'user'|'assistant'|'thinking'|'tool'|'error'
+---@field folded boolean Whether currently collapsed
 
 ---@class UIState
 ---@field sidebar_win number|nil
@@ -23,6 +24,7 @@ local MESSAGE_NS = vim.api.nvim_create_namespace 'claude_inline_messages'
 ---@field thinking_active boolean Whether currently streaming thinking
 ---@field response_start_line number|nil Line where response text starts (after thinking)
 ---@field message_blocks MessageBlock[] Array of message blocks with extmark IDs
+---@field current_message_open boolean Whether current message needs closing fold marker
 
 M._state = {
   sidebar_win = nil,
@@ -36,6 +38,7 @@ M._state = {
   thinking_active = false,
   response_start_line = nil,
   message_blocks = {},
+  current_message_open = false,
 }
 
 -- Helper functions to reduce duplication
@@ -64,6 +67,74 @@ local function scroll_to_bottom()
   end
 end
 
+--- Foldexpr function for sidebar buffer
+--- Returns fold level based on message headers and thinking sections
+---@return string Fold level expression
+function M.foldexpr()
+  local lnum = vim.v.lnum
+
+  -- IMPORTANT: vim.fn.getline() may read from wrong buffer when foldexpr is evaluated
+  -- Explicitly read from the sidebar buffer to ensure correct content
+  if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
+    return '='
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, lnum - 1, lnum, false)
+  local line = lines[1] or ''
+
+  -- Message headers start level 1 folds
+  -- >1 means "start a fold at level 1" - automatically closes previous level 1 fold
+  if line:match '^%*%*You:%*%*' or line:match '^%*%*Claude:%*%*' then
+    return '>1'
+  end
+
+  -- Thinking headers start level 2 folds (nested inside assistant)
+  if line:match '^> %*Thinking' then
+    return '>2'
+  end
+
+  -- Lines with > prefix are inside thinking section (level 2)
+  if line:match '^> ' then
+    return '2'
+  end
+
+  -- Transition out of thinking: previous line was thinking, this isn't
+  local prev_lines = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, lnum - 2, lnum - 1, false)
+  local prev = prev_lines[1] or ''
+  if prev:match '^> ' and not line:match '^> ' and line ~= '' then
+    return '1' -- Back to level 1 (still in assistant message)
+  end
+
+  return '=' -- Inherit from previous line
+end
+
+--- Foldtext function for sidebar buffer
+--- Shows role + truncated content preview
+---@return string Fold display text
+function M.foldtext()
+  local foldstart = vim.v.foldstart
+  local line = vim.fn.getline(foldstart)
+
+  -- Extract role from header
+  local role = line:match '^%*%*(.-):%*%*'
+  if not role then
+    return line -- Fallback
+  end
+
+  -- Get first content line for preview
+  local content_line = vim.fn.getline(foldstart + 1)
+  if content_line and content_line ~= '' then
+    -- Truncate to 60 chars
+    local preview = content_line:sub(1, 60)
+    if #content_line > 60 then
+      preview = preview .. '...'
+    end
+    return string.format('**%s:** %s', role, preview)
+  end
+
+  return line
+end
+
 --- Close input window and cleanup state
 ---@param win number Window handle to close
 local function close_input(win)
@@ -81,7 +152,7 @@ local function create_message_extmark(role, start_line)
   local mark_id = vim.api.nvim_buf_set_extmark(M._state.sidebar_buf, MESSAGE_NS, start_line, 0, {
     right_gravity = false, -- Stays put when text inserted at this position
   })
-  table.insert(M._state.message_blocks, { id = mark_id, role = role })
+  table.insert(M._state.message_blocks, { id = mark_id, role = role, folded = false })
   return mark_id
 end
 
@@ -138,8 +209,11 @@ function M.show_sidebar()
   vim.api.nvim_set_option_value('number', false, { win = M._state.sidebar_win })
   vim.api.nvim_set_option_value('relativenumber', false, { win = M._state.sidebar_win })
   vim.api.nvim_set_option_value('signcolumn', 'no', { win = M._state.sidebar_win })
-  -- Folding for collapsible thinking sections
-  vim.api.nvim_set_option_value('foldmethod', 'marker', { win = M._state.sidebar_win })
+  -- Folding: use manual initially, switch to expr after content is added
+  -- This prevents vim from caching foldlevel=0 for empty buffer lines
+  vim.api.nvim_set_option_value('foldmethod', 'manual', { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value('foldexpr', "v:lua.require'claude-inline.ui'.foldexpr()", { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value('foldtext', "v:lua.require'claude-inline.ui'.foldtext()", { win = M._state.sidebar_win })
   vim.api.nvim_set_option_value('foldenable', true, { win = M._state.sidebar_win })
   vim.api.nvim_set_option_value('foldlevel', 99, { win = M._state.sidebar_win }) -- Start open, collapse manually
 
@@ -177,6 +251,10 @@ end
 ---@param role string 'user' or 'assistant'
 ---@param text string
 function M.append_message(role, text)
+  -- Close any open message before starting a new one
+  M.close_current_message()
+
+  -- Message header (foldexpr detects these for folding)
   local prefix = role == 'user' and '**You:**' or '**Claude:**'
   local lines = vim.split(prefix .. '\n' .. text .. '\n\n', '\n', { plain = true })
   local start_line
@@ -195,7 +273,72 @@ function M.append_message(role, text)
     end
   end)
 
+  -- Force vim to evaluate foldexpr after buffer content changes
+  -- NOTE: vim caches fold levels and doesn't always re-evaluate when content changes
+  -- Toggle through manual mode to force re-evaluation, then use zx to update
+  if M.is_sidebar_open() then
+    vim.api.nvim_win_call(M._state.sidebar_win, function()
+      if vim.wo.foldmethod == 'expr' then
+        vim.cmd 'setlocal foldmethod=manual'
+      end
+      vim.cmd 'setlocal foldmethod=expr'
+      vim.cmd 'silent! normal! zx'
+    end)
+  end
+
+  -- Track that assistant message is still streaming
+  M._state.current_message_open = (role == 'assistant')
+
   create_message_extmark(role, start_line)
+
+  -- Collapse previous messages (but not the new one)
+  -- Schedule fold closing to ensure foldexpr has evaluated the new content
+  if M.is_sidebar_open() and #M._state.message_blocks > 1 then
+    -- Capture current block count at scheduling time
+    local blocks_to_close = #M._state.message_blocks - 1
+    vim.schedule(function()
+      if not M.is_sidebar_open() then
+        return
+      end
+      vim.api.nvim_win_call(M._state.sidebar_win, function()
+        -- Close each previous message fold individually (not zM which changes foldlevel)
+        for i = 1, blocks_to_close do
+          local block = M._state.message_blocks[i]
+          if block then
+            local mark = vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, block.id, {})
+            if mark and #mark > 0 then
+              local line = mark[1] + 1
+              local line_content = vim.fn.getline(line)
+              local foldlevel_before = vim.fn.foldlevel(line)
+              local closed_before = vim.fn.foldclosed(line)
+              vim.api.nvim_win_set_cursor(M._state.sidebar_win, { line, 0 })
+              vim.cmd 'silent! normal! zc'
+              local closed_after = vim.fn.foldclosed(line)
+              -- Debug output
+              if M._state.config and M._state.config.debug then
+                local debug = require 'claude-inline.debug'
+                debug.log(
+                  'FOLD',
+                  string.format(
+                    'block %d (%s) line %d [%s]: foldlevel=%d, closed %d->%d',
+                    i,
+                    block.role,
+                    line,
+                    line_content:sub(1, 20),
+                    foldlevel_before,
+                    closed_before,
+                    closed_after
+                  )
+                )
+              end
+              block.folded = true
+            end
+          end
+        end
+      end)
+    end)
+  end
+
   scroll_to_bottom()
 end
 
@@ -236,6 +379,13 @@ function M.update_last_message(text)
   scroll_to_bottom()
 end
 
+--- Mark the current message as complete
+--- Called when streaming completes or before starting a new message
+function M.close_current_message()
+  -- Just mark the message as complete (foldexpr handles fold boundaries)
+  M._state.current_message_open = false
+end
+
 --- Start a thinking section in the sidebar
 --- Note: Called after show_loading, which already added **Claude:** header
 function M.show_thinking()
@@ -245,8 +395,8 @@ function M.show_thinking()
 
   M._state.thinking_active = true
 
-  -- Insert thinking header with fold marker (replaces the loading spinner)
-  local header = '> *Thinking...* {{{'
+  -- Insert thinking header (foldexpr detects "> *Thinking" for nested fold)
+  local header = '> *Thinking...*'
 
   -- Find last assistant block via extmarks
   local last_block = M._state.message_blocks[#M._state.message_blocks]
@@ -316,13 +466,13 @@ function M.collapse_thinking()
     local line_count = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
     local thinking_line_count = line_count - M._state.thinking_start_line
 
-    -- Update header to show line count
+    -- Update header to show line count (foldexpr detects "> *Thinking" prefix)
     local header_line = M._state.thinking_start_line - 1 -- 0-indexed
-    local header = string.format('> *Thinking (%d lines)* {{{', thinking_line_count)
+    local header = string.format('> *Thinking (%d lines)*', thinking_line_count)
     vim.api.nvim_buf_set_lines(M._state.sidebar_buf, header_line, header_line + 1, false, { header })
 
-    -- Add closing fold marker and blank line for response
-    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, -1, -1, false, { '> }}}', '' })
+    -- Add blank line for response (foldexpr ends thinking fold when > prefix stops)
+    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, -1, -1, false, { '' })
 
     -- Track where response text should start
     M._state.response_start_line = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
@@ -362,6 +512,7 @@ function M.clear()
   M._state.thinking_start_line = nil
   M._state.thinking_active = false
   M._state.response_start_line = nil
+  M._state.current_message_open = false
 end
 
 --- Get the message block at cursor position
@@ -527,6 +678,37 @@ function M.cleanup()
   M._state.thinking_active = false
   M._state.response_start_line = nil
   M._state.message_blocks = {}
+  M._state.current_message_open = false
+end
+
+--- Collapse all message blocks in the sidebar
+function M.fold_all()
+  if not M.is_sidebar_open() then
+    return
+  end
+
+  vim.api.nvim_win_call(M._state.sidebar_win, function()
+    vim.cmd 'silent! normal! zM'
+  end)
+
+  for _, block in ipairs(M._state.message_blocks) do
+    block.folded = true
+  end
+end
+
+--- Expand all message blocks in the sidebar
+function M.unfold_all()
+  if not M.is_sidebar_open() then
+    return
+  end
+
+  vim.api.nvim_win_call(M._state.sidebar_win, function()
+    vim.cmd 'silent! %foldopen!'
+  end)
+
+  for _, block in ipairs(M._state.message_blocks) do
+    block.folded = false
+  end
 end
 
 return M

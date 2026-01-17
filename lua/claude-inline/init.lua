@@ -97,6 +97,9 @@ local function handle_message(msg)
       end
     end
 
+    -- Close the current message fold (add closing marker)
+    ui.close_current_message()
+
     M._state.streaming_text = ''
     M._state.thinking_text = ''
     return
@@ -223,6 +226,14 @@ function M.setup(opts)
       vim.notify('Usage: ClaudeInlineDebug on|off', vim.log.levels.INFO)
     end
   end, { nargs = '?', desc = 'Toggle debug logging' })
+
+  vim.api.nvim_create_user_command('ClaudeInlineFoldAll', function()
+    ui.fold_all()
+  end, { desc = 'Collapse all Claude messages' })
+
+  vim.api.nvim_create_user_command('ClaudeInlineUnfoldAll', function()
+    ui.unfold_all()
+  end, { desc = 'Expand all Claude messages' })
 
   -- Setup keymaps
   local keymaps = cfg.keymaps
