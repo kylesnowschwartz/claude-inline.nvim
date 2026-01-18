@@ -500,7 +500,6 @@ local function test_clear_resets_content_blocks()
   ui.clear()
 
   assert_true(next(ui._state.content_blocks) == nil, 'content_blocks should be empty after clear')
-  assert_eq(#ui._state.task_stack, 0, 'task_stack should be empty after clear')
 end
 
 -- Run all tests

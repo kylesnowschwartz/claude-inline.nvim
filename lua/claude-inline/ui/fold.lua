@@ -27,6 +27,23 @@ function M.foldexpr()
     return '>1'
   end
 
+  -- Task header starts level 2 fold: [Task xxx: description]
+  -- Match: starts with [Task, has a colon after the ID (distinguishes from completion line)
+  if line:match '^%[Task [^%]]+:' then
+    return '>2'
+  end
+
+  -- Task children (indented with 2 spaces) stay at level 2
+  if line:match '^  ' then
+    return '2'
+  end
+
+  -- Task completion line: [Task xxx] ✓ (no colon, has ] followed by space)
+  -- Stays at level 2, fold ends at next blank or non-indented line
+  if line:match '^%[Task [^:]+%] ' then
+    return '2'
+  end
+
   -- Tools group header starts level 2 fold (groups all tools under one fold)
   if line:match '^> %[tools:' then
     return '>2'
@@ -70,9 +87,16 @@ end
 ---@return string Fold display text
 function M.foldtext()
   local foldstart = vim.v.foldstart
+  local foldend = vim.v.foldend
   local line = vim.fn.getline(foldstart)
 
-  -- Extract role from header
+  -- Task header: show line count
+  if line:match '^%[Task' then
+    local line_count = foldend - foldstart
+    return string.format('%s  (%d lines)', line, line_count)
+  end
+
+  -- Extract role from message header
   local role = line:match '^%*%*(.-):%*%*'
   if not role then
     return line -- Fallback
