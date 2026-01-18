@@ -3,8 +3,6 @@
 
 local M = {}
 
-local MAX_PARAM_LEN = 60
-
 -- Maps tool name to the input field that best identifies what it operates on
 ---@type table<string, string>
 local KEY_PARAM_FIELDS = {
@@ -53,9 +51,6 @@ function M.tool_line(tool_name, input)
 
   -- nvim_buf_set_lines rejects embedded newlines
   key_param = key_param:gsub('\n', ' ')
-  if #key_param > MAX_PARAM_LEN then
-    key_param = key_param:sub(1, MAX_PARAM_LEN - 3) .. '...'
-  end
   return string.format('%s(%s)', tool_name, key_param)
 end
 

@@ -14,8 +14,12 @@ local function define_highlights()
   vim.api.nvim_set_hl(0, 'CISignAssistant', { fg = '#c678dd', bold = true }) -- Purple
 end
 
--- Define highlights on module load
+-- Define highlights on module load and after colorscheme changes
 define_highlights()
+vim.api.nvim_create_autocmd('ColorScheme', {
+  group = vim.api.nvim_create_augroup('ClaudeInlineHighlights', { clear = true }),
+  callback = define_highlights,
+})
 
 --- Check if sidebar is open
 ---@return boolean
