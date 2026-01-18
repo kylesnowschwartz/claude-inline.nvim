@@ -46,7 +46,6 @@ M.show_tool_result = tool_result.show
 
 -- Re-export block utility functions
 M.clear = blocks.clear_all
-M.get_block_at_cursor = blocks.get_at_cursor
 M.get_all_blocks = blocks.get_all
 
 -- Re-export input function

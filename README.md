@@ -8,8 +8,8 @@ Minimal Claude chat for Neovim. Send prompts to Claude Code CLI with persistent 
 - **Sidebar Chat**: Conversation history in a dedicated split window
 - **Floating Input**: Clean prompt input without leaving your code
 - **Streaming Responses**: See Claude's response as it's generated
-- **Tool Use Display**: See when Claude reads files, runs commands, etc.
-- **Collapsible Sections**: Thinking blocks and tool calls fold for clean display
+- **Tool Use Display**: See when Claude reads files, runs commands (single-line format)
+- **Collapsible Messages**: User/assistant messages fold for clean navigation
 - **Zero Dependencies**: Pure Neovim Lua, no external plugins required
 
 ## Installation
@@ -99,7 +99,13 @@ Messages are sent as NDJSON:
 
 Claude responds with streaming chunks (`type: "assistant"`) followed by a final result (`type: "result"`).
 
-When Claude uses tools (reading files, running bash commands), the plugin displays collapsible blocks showing what tool was called and its result. These auto-fold to keep the conversation clean while still being expandable with `za`.
+When Claude uses tools (reading files, running bash commands), the plugin displays single-line entries:
+```
+Read(init.lua) ✓ 45ms
+Bash(npm test) ✗ exit 1
+```
+
+For Task agents (sub-agents), children are grouped under the parent with indentation.
 
 ## License
 

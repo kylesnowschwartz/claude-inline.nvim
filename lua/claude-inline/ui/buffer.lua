@@ -41,4 +41,47 @@ function M.scroll_to_bottom()
   end
 end
 
+--- Get current line position from a tool extmark
+---@param extmark_id number
+---@return number|nil 0-indexed line number
+function M.get_tool_extmark_line(extmark_id)
+  if not M.is_valid() then
+    return nil
+  end
+  local mark = vim.api.nvim_buf_get_extmark_by_id(state.sidebar_buf, state.TOOL_NS, extmark_id, {})
+  if mark and #mark >= 1 then
+    return mark[1]
+  end
+  return nil
+end
+
+--- Calculate insert position for content under a parent Task block
+---@param parent_id string|nil Parent tool/task ID
+---@param increment_child_count boolean Whether to increment parent's child_count
+---@return number 0-indexed line number for insertion
+function M.get_child_insert_line(parent_id, increment_child_count)
+  local insert_line = nil
+  if parent_id then
+    local parent = state.content_blocks[parent_id]
+    if parent and parent.extmark_id then
+      local parent_line = M.get_tool_extmark_line(parent.extmark_id)
+      if parent_line then
+        insert_line = parent_line + 1 + (parent.child_count or 0)
+        if increment_child_count then
+          parent.child_count = (parent.child_count or 0) + 1
+        end
+      end
+    end
+  end
+  if not insert_line then
+    insert_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
+  end
+  -- Clamp to buffer bounds (child_count can become stale with parallel Tasks)
+  local max_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
+  if insert_line > max_line then
+    insert_line = max_line
+  end
+  return insert_line
+end
+
 return M

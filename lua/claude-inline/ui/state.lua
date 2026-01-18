@@ -11,8 +11,6 @@
 ---@field id string|nil Tool use ID (for tool_use/tool_result)
 ---@field name string|nil Tool name (for tool_use)
 ---@field extmark_id number|nil Extmark ID for position tracking
----@field folded boolean Whether currently collapsed
----@field state 'running'|'success'|'error'|nil State for tool blocks
 ---@field input_json string|nil Accumulated JSON input for tool_use
 ---@field child_count number|nil Number of children (for Task blocks)
 

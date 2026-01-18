@@ -14,12 +14,26 @@ Single Claude CLI process stays alive, maintaining conversation memory. No WebSo
 
 ```
 lua/claude-inline/
-├── init.lua      # Entry point, commands, keymaps, message routing
-├── client.lua    # Claude process lifecycle, NDJSON parsing
-├── ui.lua        # Sidebar split, floating input, loading spinner, tool folds
-├── selection.lua # Visual mode capture with proper mode handling
-├── config.lua    # Defaults and user config merge
-└── debug.lua     # Debug logging to /tmp/claude-inline-debug.log
+├── init.lua        # Entry point, commands, keymaps, message routing
+├── client.lua      # Claude process lifecycle, NDJSON parsing
+├── config.lua      # Defaults and user config merge
+├── debug.lua       # Debug logging to /tmp/claude-inline-debug.log
+├── health.lua      # :checkhealth support
+├── selection.lua   # Visual mode capture with proper mode handling
+└── ui/
+    ├── init.lua    # UI facade, re-exports all components
+    ├── state.lua   # Shared state (windows, buffers, blocks)
+    ├── sidebar.lua # Sidebar window management
+    ├── input.lua   # Floating input window
+    ├── loading.lua # Spinner animation
+    ├── buffer.lua  # Buffer utilities (modifiable, extmarks)
+    ├── fold.lua    # Foldexpr/foldtext for collapsible sections
+    └── blocks/
+        ├── init.lua      # Block registry, clear_all
+        ├── message.lua   # User/assistant message blocks
+        ├── tool_use.lua  # Tool invocation display
+        ├── tool_result.lua # Tool result display
+        └── format.lua    # Tool formatting helpers
 ```
 
 ## How It Works
@@ -119,24 +133,22 @@ ui.show_tool_use(block.id, block.name, block.input, parent_id)
 ```
 
 ### Tool Use Display
-When Claude invokes tools (read files, run commands, etc.), the plugin displays collapsible blocks:
+When Claude invokes tools (read files, run commands, etc.), the plugin displays single-line entries:
 
-**Tool invocation:**
+**Regular tool:**
 ```
-> [tool: read_file] running...
-> +--
-> |   path: "lua/claude-inline/init.lua"
-> +--
+Read(init.lua) ...          # While running
+Read(init.lua) ✓ 45ms       # Success with duration
+Bash(npm test) ✗ exit 1     # Error with exit code
 ```
 
-**Tool result (with metadata):**
+**Task (sub-agent) with children:**
 ```
-> [result: Glob] success (3 files, 45ms)
-> +--
-> |   lua/claude-inline/init.lua
-> |   lua/claude-inline/ui.lua
-> |   lua/claude-inline/client.lua
-> +--
+[Task abc123: Find most starred repo]
+  Bash(gh search repos --sort stars) ✓
+  Read(results.json) ✓
+[Task abc123] ✓ 12.5s, 2 tools
+  The most starred repo is freeCodeCamp.
 ```
 
 When `tool_use_result` metadata is available, results show file counts, duration, exit codes, and truncation status.
@@ -144,11 +156,11 @@ When `tool_use_result` metadata is available, results show file counts, duration
 Flow:
 1. `content_block_start` with `type: "tool_use"` triggers `ui.show_tool_use()`
 2. `content_block_delta` with `type: "input_json_delta"` streams parameters via `ui.update_tool_input()`
-3. `content_block_stop` finalizes with `ui.complete_tool()`, auto-collapses the block
-4. `user` message with `type: "tool_result"` triggers `ui.show_tool_result()`, auto-collapses
+3. `content_block_stop` finalizes with `ui.complete_tool()`
+4. `user` message with `type: "tool_result"` triggers `ui.show_tool_result()` - updates line in-place
 5. Claude continues with response text
 
-Tool blocks use `foldexpr` level 2 folds (nested inside assistant message), collapsible with `za`.
+Tools are tracked with extmarks so parallel Task children are correctly positioned under their parent.
 
 ## Commands & Keymaps
 
@@ -195,9 +207,24 @@ Log file: `/tmp/claude-inline-debug.log`
 
 Shows message types, stream events, and content block metadata. Useful for diagnosing issues with response parsing or duplicate content.
 
-## Testing (Manual)
+## Testing
 
-No automated tests yet. Manual verification:
+Automated tests in `tests/`:
+- `ui_spec.lua` - UI component tests (messages, folds, tool display)
+- `streaming_integration_spec.lua` - End-to-end message handling
+
+```bash
+# Run all tests
+just test
+
+# Run specific test file
+nvim --headless -u tests/minimal_init.lua -c "lua require('tests.ui_spec').run()"
+
+# Run streaming tests
+just test-streaming
+```
+
+Manual verification:
 1. `:lua require('claude-inline').setup()`
 2. `<leader>cs` -> type "Hello" -> Enter
 3. Verify response appears in sidebar
@@ -237,12 +264,18 @@ Don't reinvent solutions that already exist in the reference implementations.
 ## Development Commands
 
 ```bash
-# Syntax check
-luajit -bl lua/claude-inline/*.lua > /dev/null && echo "OK"
+# Syntax check all files
+just check
+
+# Or manually:
+find lua -name "*.lua" -exec luajit -bl {} \; > /dev/null && echo "OK"
+
+# Run tests
+just test
 
 # Test Claude CLI format directly
 echo '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}' | claude -p --input-format stream-json --output-format stream-json
 
 # Load in Neovim for testing
-nvim --cmd "set rtp+=~/Code/my-projects/claude-inline.nvim"
+nvim --cmd "set rtp+=."
 ```

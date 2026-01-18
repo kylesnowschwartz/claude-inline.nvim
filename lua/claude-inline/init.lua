@@ -11,15 +11,23 @@ local debug = require 'claude-inline.debug'
 M._state = {
   initialized = false,
   streaming_text = '',
-  -- Content block tracking for stream events
+  -- Stream block tracking for stream events
   -- Maps stream event index to content block data
-  content_blocks = {},
+  stream_blocks = {},
   -- Track tool IDs we've already shown (prevents duplicates from assistant fallback)
   shown_tool_ids = {},
   -- Track if any tools have been shown for the current message
   -- Once tools are displayed, we stop updating text to avoid wiping them
   tools_shown = false,
 }
+
+--- Reset streaming state for a new message
+local function reset_streaming_state()
+  M._state.streaming_text = ''
+  M._state.stream_blocks = {}
+  M._state.shown_tool_ids = {}
+  M._state.tools_shown = false
+end
 
 --- Handle incoming messages from Claude CLI
 ---@param msg table
@@ -49,7 +57,7 @@ local function handle_message(msg)
         -- Starting a tool use block
         ui.hide_loading()
         -- Store block info for later reference
-        M._state.content_blocks[index] = {
+        M._state.stream_blocks[index] = {
           type = 'tool_use',
           id = block.id,
           name = block.name,
@@ -62,7 +70,7 @@ local function handle_message(msg)
         M._state.tools_shown = true
       elseif block.type == 'text' then
         -- Starting a text block
-        M._state.content_blocks[index] = { type = 'text' }
+        M._state.stream_blocks[index] = { type = 'text' }
       end
     elseif event.type == 'content_block_delta' then
       local delta = event.delta or {}
@@ -76,14 +84,14 @@ local function handle_message(msg)
         end
       elseif delta.type == 'input_json_delta' then
         -- Tool input JSON streaming
-        local block_info = M._state.content_blocks[index]
+        local block_info = M._state.stream_blocks[index]
         if block_info and block_info.type == 'tool_use' then
           ui.update_tool_input(block_info.id, delta.partial_json or '')
         end
       end
     elseif event.type == 'content_block_stop' then
       -- Block finished streaming
-      local block_info = M._state.content_blocks[index]
+      local block_info = M._state.stream_blocks[index]
       if block_info and block_info.type == 'tool_use' then
         ui.complete_tool(block_info.id)
       end
@@ -98,7 +106,7 @@ local function handle_message(msg)
     -- If we already have streamed content via stream_events, skip text blocks
     -- The assistant message is just a summary of what we already displayed
     local content = msg.message and msg.message.content
-    if content then
+    if type(content) == 'table' then
       for _, block in ipairs(content) do
         if block.type == 'text' then
           -- Only show text if we haven't streamed it already
@@ -131,7 +139,11 @@ local function handle_message(msg)
     -- tool_use_result contains metadata like durationMs, numFiles, exitCode, truncated
     local metadata = msg.tool_use_result
     local content = msg.message and msg.message.content
-    if content then
+    if type(content) == 'string' then
+      -- Direct string content (e.g., from /context command output)
+      ui.hide_loading()
+      ui.update_last_message(content)
+    elseif type(content) == 'table' then
       for _, block in ipairs(content) do
         if block.type == 'tool_result' then
           ui.show_tool_result(block.tool_use_id, block.content or '', block.is_error, metadata)
@@ -158,10 +170,7 @@ local function handle_message(msg)
     ui.close_current_message()
 
     -- Reset streaming state
-    M._state.streaming_text = ''
-    M._state.content_blocks = {}
-    M._state.shown_tool_ids = {}
-    M._state.tools_shown = false
+    reset_streaming_state()
     return
   end
 end
@@ -187,9 +196,8 @@ function M.send(prompt)
   -- Add user message to chat
   ui.append_message('user', prompt)
 
-  -- Reset streaming state
-  M._state.streaming_text = ''
-  M._state.tools_shown = false
+  -- Reset streaming state for new response
+  reset_streaming_state()
 
   -- Start client if needed
   if not client.is_running() then
@@ -245,10 +253,7 @@ end
 function M.clear()
   ui.clear()
   client.stop()
-  M._state.streaming_text = ''
-  M._state.content_blocks = {}
-  M._state.shown_tool_ids = {}
-  M._state.tools_shown = false
+  reset_streaming_state()
 end
 
 --- Setup the plugin

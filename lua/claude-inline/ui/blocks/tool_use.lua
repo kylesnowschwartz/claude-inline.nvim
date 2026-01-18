@@ -18,20 +18,6 @@ local M = {}
 ---@field parent_task_id string|nil ID of parent Task if this is a child tool
 ---@field child_count number Number of children inserted after this Task
 
---- Get current line position from extmark
----@param extmark_id number
----@return number|nil 0-indexed line number
-local function get_extmark_line(extmark_id)
-  if not buffer.is_valid() then
-    return nil
-  end
-  local mark = vim.api.nvim_buf_get_extmark_by_id(state.sidebar_buf, state.TOOL_NS, extmark_id, {})
-  if mark and #mark >= 1 then
-    return mark[1]
-  end
-  return nil
-end
-
 --- Display a tool invocation line
 ---@param tool_id string
 ---@param tool_name string
@@ -65,58 +51,14 @@ function M.show(tool_id, tool_name, input, parent_tool_use_id)
     local desc = input and input.description or 'sub-agent'
     local short_id = tool_id:sub(-6)
     line_text = string.format('[Task %s: %s]', short_id, desc)
-
-    -- Find insert position: after parent's children, or at end
-    if parent_task_id then
-      local parent = state.content_blocks[parent_task_id]
-      if parent and parent.extmark_id then
-        local parent_line = get_extmark_line(parent.extmark_id)
-        if parent_line then
-          insert_line = parent_line + 1 + parent.child_count
-          parent.child_count = parent.child_count + 1
-        end
-      end
-    end
-
-    -- Default: append at end
-    if not insert_line then
-      insert_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
-    end
-
-    -- Clamp to buffer bounds (child_count can become stale with parallel Tasks)
-    local max_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
-    if insert_line > max_line then
-      insert_line = max_line
-    end
-    -- No stack push needed - parent_tool_use_id from messages handles nesting
   else
     -- Regular tool: render with indent if has parent
     local indent = parent_task_id and '  ' or ''
     line_text = indent .. format.tool_line(tool_name, input) .. ' ...'
-
-    -- Find insert position: after parent's children
-    if parent_task_id then
-      local parent = state.content_blocks[parent_task_id]
-      if parent and parent.extmark_id then
-        local parent_line = get_extmark_line(parent.extmark_id)
-        if parent_line then
-          insert_line = parent_line + 1 + parent.child_count
-          parent.child_count = parent.child_count + 1
-        end
-      end
-    end
-
-    -- Default: append at end
-    if not insert_line then
-      insert_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
-    end
-
-    -- Clamp to buffer bounds (child_count can become stale with parallel Tasks)
-    local max_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
-    if insert_line > max_line then
-      insert_line = max_line
-    end
   end
+
+  -- Calculate insert position using shared helper
+  insert_line = buffer.get_child_insert_line(parent_task_id, true)
 
   -- Insert line at calculated position
   buffer.with_modifiable(function()
@@ -150,7 +92,7 @@ function M.update_input(tool_id, partial_json)
 
     -- Update display using extmark position
     if block.extmark_id then
-      local line_num = get_extmark_line(block.extmark_id)
+      local line_num = buffer.get_tool_extmark_line(block.extmark_id)
       if line_num then
         local line_text
         if block.is_task then
