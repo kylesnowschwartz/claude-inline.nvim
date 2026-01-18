@@ -68,11 +68,26 @@ function M.show(tool_use_id, content, is_error, metadata)
     local lines_to_insert = { completion }
 
     -- Add Task result content if present (the agent's final answer)
-    if content and content ~= '' then
-      -- Indent result content and wrap long lines
-      local result_lines = vim.split(content, '\n', { plain = true })
-      for _, line in ipairs(result_lines) do
-        table.insert(lines_to_insert, '  ' .. line)
+    -- Content can be a string or a table of content blocks [{type: "text", text: "..."}]
+    if content then
+      local text_content = content
+      if type(content) == 'table' then
+        -- Extract text from content blocks
+        local texts = {}
+        for _, block in ipairs(content) do
+          if block.type == 'text' and block.text then
+            table.insert(texts, block.text)
+          end
+        end
+        text_content = table.concat(texts, '\n')
+      end
+
+      if text_content and text_content ~= '' then
+        -- Indent result content
+        local result_lines = vim.split(text_content, '\n', { plain = true })
+        for _, line in ipairs(result_lines) do
+          table.insert(lines_to_insert, '  ' .. line)
+        end
       end
     end
 
