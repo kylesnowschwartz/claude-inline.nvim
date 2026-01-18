@@ -14,6 +14,8 @@ M._state = {
   -- Content block tracking for stream events
   -- Maps stream event index to content block data
   content_blocks = {},
+  -- Track tool IDs we've already shown (prevents duplicates from assistant fallback)
+  shown_tool_ids = {},
   -- Track if any tools have been shown for the current message
   -- Once tools are displayed, we stop updating text to avoid wiping them
   tools_shown = false,
@@ -56,6 +58,7 @@ local function handle_message(msg)
         -- parent_tool_use_id comes from the message level, not the block
         local parent_id = msg.parent_tool_use_id
         ui.show_tool_use(block.id, block.name, block.input, parent_id)
+        M._state.shown_tool_ids[block.id] = true
         M._state.tools_shown = true
       elseif block.type == 'text' then
         -- Starting a text block
@@ -108,10 +111,11 @@ local function handle_message(msg)
         elseif block.type == 'tool_use' then
           -- Fallback for non-streaming: show tool_use from final message
           -- This handles cases where stream_events weren't available
-          if not M._state.content_blocks[block.id] then
+          if not M._state.shown_tool_ids[block.id] then
             -- parent_tool_use_id comes from the message level
             local parent_id = msg.parent_tool_use_id
             ui.show_tool_use(block.id, block.name, block.input, parent_id)
+            M._state.shown_tool_ids[block.id] = true
             ui.complete_tool(block.id)
             ui.collapse_tool(block.id)
             M._state.tools_shown = true
@@ -161,6 +165,7 @@ local function handle_message(msg)
     -- Reset streaming state
     M._state.streaming_text = ''
     M._state.content_blocks = {}
+    M._state.shown_tool_ids = {}
     M._state.tools_shown = false
     return
   end
@@ -247,6 +252,7 @@ function M.clear()
   client.stop()
   M._state.streaming_text = ''
   M._state.content_blocks = {}
+  M._state.shown_tool_ids = {}
   M._state.tools_shown = false
 end
 

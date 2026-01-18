@@ -24,7 +24,7 @@ end
 
 --- Update the tool line with result status
 ---@param tool_use_id string The ID of the tool_use this result is for
----@param content string|nil The result content (unused in one-line display)
+---@param content string|nil The result content (shown for Task agents)
 ---@param is_error boolean|nil Whether this is an error result
 ---@param metadata table|nil Optional metadata from tool_use_result
 function M.show(tool_use_id, content, is_error, metadata)
@@ -60,12 +60,27 @@ function M.show(tool_use_id, content, is_error, metadata)
       insert_line = max_line
     end
 
-    -- Completion line + blank separator
+    -- Completion line with result content
     local short_id = tool_use_id:sub(-6)
     local completion = '[Task ' .. short_id .. '] ' .. status .. meta_str
 
+    -- Build lines to insert: completion line, result content (if any), blank separator
+    local lines_to_insert = { completion }
+
+    -- Add Task result content if present (the agent's final answer)
+    if content and content ~= '' then
+      -- Indent result content and wrap long lines
+      local result_lines = vim.split(content, '\n', { plain = true })
+      for _, line in ipairs(result_lines) do
+        table.insert(lines_to_insert, '  ' .. line)
+      end
+    end
+
+    -- Blank separator after Task block
+    table.insert(lines_to_insert, '')
+
     buffer.with_modifiable(function()
-      vim.api.nvim_buf_set_lines(state.sidebar_buf, insert_line, insert_line, false, { completion, '' })
+      vim.api.nvim_buf_set_lines(state.sidebar_buf, insert_line, insert_line, false, lines_to_insert)
     end)
   else
     -- Regular tool: update line in-place using extmark position

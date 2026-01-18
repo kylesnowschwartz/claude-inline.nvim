@@ -294,11 +294,12 @@ local function test_parallel_tasks_interleaved()
   }
 
   -- Task 1 completes (took longer due to retry)
+  -- content contains the agent's final answer/conclusion
   inject {
     type = 'user',
     message = {
       role = 'user',
-      content = { { type = 'tool_result', tool_use_id = 'task_1', is_error = false } },
+      content = { { type = 'tool_result', tool_use_id = 'task_1', content = 'The most starred repo is freeCodeCamp/freeCodeCamp.', is_error = false } },
     },
     tool_use_result = { totalDurationMs = 12500, totalToolUseCount = 2 },
   }
@@ -308,7 +309,7 @@ local function test_parallel_tasks_interleaved()
     type = 'user',
     message = {
       role = 'user',
-      content = { { type = 'tool_result', tool_use_id = 'task_2', is_error = false } },
+      content = { { type = 'tool_result', tool_use_id = 'task_2', content = 'Confirmed: freeCodeCamp is the most starred.', is_error = false } },
     },
     tool_use_result = { totalDurationMs = 8000, totalToolUseCount = 1 },
   }
