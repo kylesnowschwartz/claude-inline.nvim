@@ -17,11 +17,12 @@ local M = {}
 ---@field is_task boolean Whether this is a Task (sub-agent) tool
 ---@field parent_task_id string|nil ID of parent Task if this is a child tool
 
---- Get indentation prefix based on task nesting
+--- Get indentation prefix based on task nesting depth
 ---@return string
 local function get_indent()
-  if state.current_task_id then
-    return '  '
+  local depth = #state.task_stack
+  if depth > 0 then
+    return string.rep('  ', depth)
   end
   return ''
 end
@@ -38,6 +39,9 @@ function M.show(tool_id, tool_name, input)
   local is_task = tool_name == 'Task'
   local line_num = vim.api.nvim_buf_line_count(state.sidebar_buf)
 
+  -- Parent is top of stack (if any)
+  local parent_task_id = state.task_stack[#state.task_stack]
+
   -- Store block state
   state.content_blocks[tool_id] = {
     type = 'tool_use',
@@ -46,16 +50,19 @@ function M.show(tool_id, tool_name, input)
     input = input,
     line = line_num,
     is_task = is_task,
-    parent_task_id = state.current_task_id,
+    parent_task_id = parent_task_id,
   }
 
   local lines = {}
 
   if is_task then
-    -- Task tool: emit header line, track as current task
+    -- Task tool: emit header line, push onto stack
+    local indent = get_indent()
     local desc = input and input.description or 'sub-agent'
-    table.insert(lines, string.format('[Task: %s]', desc))
-    state.current_task_id = tool_id
+    -- Show short ID suffix for debugging task grouping
+    local short_id = tool_id:sub(-6)
+    table.insert(lines, string.format('%s[Task %s: %s]', indent, short_id, desc))
+    table.insert(state.task_stack, tool_id)
   else
     -- Regular tool: indent if inside a task
     local indent = get_indent()

@@ -66,7 +66,7 @@ function M.clear_all()
 
   state.current_message_open = false
   state.content_blocks = {}
-  state.current_task_id = nil
+  state.task_stack = {}
 end
 
 return M

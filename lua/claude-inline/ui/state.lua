@@ -27,7 +27,7 @@
 ---@field message_blocks MessageBlock[] Array of message blocks with extmark IDs
 ---@field current_message_open boolean Whether current message needs closing fold marker
 ---@field content_blocks table<string, ContentBlock> Active content blocks by ID
----@field current_task_id string|nil ID of currently running Task (for grouping child tools)
+---@field task_stack string[] Stack of active Task IDs (for nesting)
 
 local M = {
   sidebar_win = nil,
@@ -40,7 +40,7 @@ local M = {
   message_blocks = {},
   current_message_open = false,
   content_blocks = {},
-  current_task_id = nil,
+  task_stack = {},
 }
 
 -- Namespace for message block extmarks

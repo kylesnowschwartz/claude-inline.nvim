@@ -23,19 +23,39 @@ function M.show(tool_use_id, content, is_error, metadata)
   local meta_str = format.metadata_suffix(metadata)
 
   if tool_block.is_task then
-    -- Task completion: emit summary line and clear current task
-    local line = '[Task] ' .. status .. meta_str
+    -- Pop this task from stack (find and remove it)
+    for i = #state.task_stack, 1, -1 do
+      if state.task_stack[i] == tool_use_id then
+        table.remove(state.task_stack, i)
+        break
+      end
+    end
+
+    -- Task completion: emit summary line at current indent level
+    local indent = string.rep('  ', #state.task_stack)
+    local short_id = tool_use_id:sub(-6)
+    local line = indent .. '[Task ' .. short_id .. '] ' .. status .. meta_str
     buffer.with_modifiable(function()
       vim.api.nvim_buf_set_lines(state.sidebar_buf, -1, -1, false, { line })
     end)
-
-    -- Clear task tracking so subsequent tools aren't indented
-    if state.current_task_id == tool_use_id then
-      state.current_task_id = nil
-    end
   else
-    -- Regular tool: update line in-place
-    local indent = tool_block.parent_task_id and '  ' or ''
+    -- Regular tool: update line in-place with same indent as when created
+    -- Count how deep the parent was in the stack when this tool was created
+    local depth = 0
+    if tool_block.parent_task_id then
+      -- Find parent's depth by counting how many tasks are above it in stack
+      for i, tid in ipairs(state.task_stack) do
+        if tid == tool_block.parent_task_id then
+          depth = i
+          break
+        end
+      end
+      -- If parent not in stack anymore, use stored line's indent
+      if depth == 0 then
+        depth = 1 -- minimum indent for child of a task
+      end
+    end
+    local indent = string.rep('  ', depth)
     local line = indent .. format.tool_line(tool_block.name, tool_block.input) .. ' ' .. status .. meta_str
 
     buffer.with_modifiable(function()
