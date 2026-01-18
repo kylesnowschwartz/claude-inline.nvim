@@ -10,10 +10,18 @@ check:
     @echo "Running luacheck..."
     @luacheck lua/ tests/ --config .luacheckrc
 
-# Run tests in headless Neovim
+# Run all tests in headless Neovim
 test:
-    @echo "Running tests..."
+    @echo "Running UI tests..."
     @nvim --headless -u tests/minimal_init.lua +"lua require('tests.ui_spec').run()"
+    @echo ""
+    @echo "Running streaming integration tests..."
+    @nvim --headless -u tests/minimal_init.lua +"lua require('tests.streaming_integration_spec').run(); vim.cmd('qall!')"
+
+# Run only streaming integration tests (fast iteration)
+test-streaming:
+    @echo "Running streaming integration tests..."
+    @nvim --headless -u tests/minimal_init.lua +"lua require('tests.streaming_integration_spec').run(); vim.cmd('qall!')"
 
 # Format with stylua (if available)
 format:
@@ -39,3 +47,4 @@ watch:
 # Show test output with verbose logging
 test-verbose:
     @nvim --headless -u tests/minimal_init.lua +"lua require('claude-inline').setup({debug=true}); require('tests.ui_spec').run()"
+    @nvim --headless -u tests/minimal_init.lua +"lua require('claude-inline').setup({debug=true}); require('tests.streaming_integration_spec').run(); vim.cmd('qall!')"

@@ -1,6 +1,6 @@
 --- Tool use block component for claude-inline.nvim
 --- Displays tool invocations as single-line entries
---- Groups child tools under parent Task agents
+--- Uses extmarks for position tracking to handle parallel Tasks
 
 local state = require 'claude-inline.ui.state'
 local buffer = require 'claude-inline.ui.buffer'
@@ -13,18 +13,23 @@ local M = {}
 ---@field id string
 ---@field name string
 ---@field input table|nil
----@field line number 0-indexed buffer line where this tool is displayed
+---@field extmark_id number|nil Extmark for position tracking
 ---@field is_task boolean Whether this is a Task (sub-agent) tool
 ---@field parent_task_id string|nil ID of parent Task if this is a child tool
+---@field child_count number Number of children inserted after this Task
 
---- Get indentation prefix based on task nesting depth
----@return string
-local function get_indent()
-  local depth = #state.task_stack
-  if depth > 0 then
-    return string.rep('  ', depth)
+--- Get current line position from extmark
+---@param extmark_id number
+---@return number|nil 0-indexed line number
+local function get_extmark_line(extmark_id)
+  if not buffer.is_valid() then
+    return nil
   end
-  return ''
+  local mark = vim.api.nvim_buf_get_extmark_by_id(state.sidebar_buf, state.TOOL_NS, extmark_id, {})
+  if mark and #mark >= 1 then
+    return mark[1]
+  end
+  return nil
 end
 
 --- Display a tool invocation line
@@ -37,43 +42,92 @@ function M.show(tool_id, tool_name, input)
   end
 
   local is_task = tool_name == 'Task'
-  local line_num = vim.api.nvim_buf_line_count(state.sidebar_buf)
-
-  -- Parent is top of stack (if any)
   local parent_task_id = state.task_stack[#state.task_stack]
 
-  -- Store block state
-  state.content_blocks[tool_id] = {
+  -- Create block record
+  local block = {
     type = 'tool_use',
     id = tool_id,
     name = tool_name,
     input = input,
-    line = line_num,
+    extmark_id = nil,
     is_task = is_task,
     parent_task_id = parent_task_id,
+    child_count = 0,
   }
 
-  local lines = {}
+  local insert_line
+  local line_text
 
   if is_task then
-    -- Task tool: emit header line, push onto stack
-    local indent = get_indent()
+    -- Task: render header, track position with extmark
     local desc = input and input.description or 'sub-agent'
-    -- Show short ID suffix for debugging task grouping
     local short_id = tool_id:sub(-6)
-    table.insert(lines, string.format('%s[Task %s: %s]', indent, short_id, desc))
+    line_text = string.format('[Task %s: %s]', short_id, desc)
+
+    -- Find insert position: after parent's children, or at end
+    if parent_task_id then
+      local parent = state.content_blocks[parent_task_id]
+      if parent and parent.extmark_id then
+        local parent_line = get_extmark_line(parent.extmark_id)
+        if parent_line then
+          insert_line = parent_line + 1 + parent.child_count
+          parent.child_count = parent.child_count + 1
+        end
+      end
+    end
+
+    -- Default: append at end
+    if not insert_line then
+      insert_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
+    end
+
+    -- Clamp to buffer bounds (child_count can become stale with parallel Tasks)
+    local max_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
+    if insert_line > max_line then
+      insert_line = max_line
+    end
+
+    -- Push onto task stack
     table.insert(state.task_stack, tool_id)
   else
-    -- Regular tool: indent if inside a task
-    local indent = get_indent()
-    local line = indent .. format.tool_line(tool_name, input) .. ' ...'
-    table.insert(lines, line)
+    -- Regular tool: render with indent if has parent
+    local indent = parent_task_id and '  ' or ''
+    line_text = indent .. format.tool_line(tool_name, input) .. ' ...'
+
+    -- Find insert position: after parent's children
+    if parent_task_id then
+      local parent = state.content_blocks[parent_task_id]
+      if parent and parent.extmark_id then
+        local parent_line = get_extmark_line(parent.extmark_id)
+        if parent_line then
+          insert_line = parent_line + 1 + parent.child_count
+          parent.child_count = parent.child_count + 1
+        end
+      end
+    end
+
+    -- Default: append at end
+    if not insert_line then
+      insert_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
+    end
+
+    -- Clamp to buffer bounds (child_count can become stale with parallel Tasks)
+    local max_line = vim.api.nvim_buf_line_count(state.sidebar_buf)
+    if insert_line > max_line then
+      insert_line = max_line
+    end
   end
 
+  -- Insert line at calculated position
   buffer.with_modifiable(function()
-    vim.api.nvim_buf_set_lines(state.sidebar_buf, -1, -1, false, lines)
+    vim.api.nvim_buf_set_lines(state.sidebar_buf, insert_line, insert_line, false, { line_text })
   end)
 
+  -- Create extmark at the inserted line (right_gravity=true so it moves with insertions)
+  block.extmark_id = vim.api.nvim_buf_set_extmark(state.sidebar_buf, state.TOOL_NS, insert_line, 0, {})
+
+  state.content_blocks[tool_id] = block
   buffer.scroll_to_bottom()
 end
 
@@ -86,28 +140,39 @@ function M.update_input(tool_id, partial_json)
     return
   end
 
-  -- Accumulate JSON for later parsing when result arrives
+  -- Accumulate JSON for later parsing
   block.input_json = (block.input_json or '') .. partial_json
 
-  -- Try to parse and update display with current input
+  -- Try to parse and update stored input
   local ok, parsed = pcall(vim.json.decode, block.input_json)
   if ok and parsed and type(parsed) == 'table' then
     block.input = parsed
 
-    -- Don't update display for Task tools (they show header, not one-liner)
-    if block.is_task then
-      return
-    end
+    -- Update display using extmark position
+    if block.extmark_id then
+      local line_num = get_extmark_line(block.extmark_id)
+      if line_num then
+        local line_text
+        if block.is_task then
+          -- Update Task header with description
+          local desc = parsed.description or 'sub-agent'
+          local short_id = tool_id:sub(-6)
+          line_text = string.format('[Task %s: %s]', short_id, desc)
+        else
+          -- Update tool line
+          local indent = block.parent_task_id and '  ' or ''
+          line_text = indent .. format.tool_line(block.name, parsed) .. ' ...'
+        end
 
-    local indent = block.parent_task_id and '  ' or ''
-    local line = indent .. format.tool_line(block.name, parsed) .. ' ...'
-    buffer.with_modifiable(function()
-      vim.api.nvim_buf_set_lines(state.sidebar_buf, block.line, block.line + 1, false, { line })
-    end)
+        buffer.with_modifiable(function()
+          vim.api.nvim_buf_set_lines(state.sidebar_buf, line_num, line_num + 1, false, { line_text })
+        end)
+      end
+    end
   end
 end
 
---- Mark a tool use as complete (result will update the line with final status)
+--- Mark a tool use as complete (result will update with final status)
 ---@param tool_id string
 ---@param tool_state? 'success'|'error'
 function M.complete(tool_id, tool_state)

@@ -82,6 +82,16 @@ function M.metadata_suffix(metadata)
     return string.format(' %.1fs, %d tools', secs, metadata.totalToolUseCount or 0)
   end
 
+  -- Glob/file search: show file count
+  if metadata.numFiles then
+    return string.format(' %d files', metadata.numFiles)
+  end
+
+  -- Grep/search: show match count
+  if metadata.numMatches then
+    return string.format(' %d matches', metadata.numMatches)
+  end
+
   return ''
 end
 

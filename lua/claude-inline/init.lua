@@ -317,4 +317,9 @@ end
 -- Expose debug module for direct access
 M.debug = debug
 
+-- Expose internals for integration testing
+M._test = {
+  handle_message = handle_message,
+}
+
 return M
