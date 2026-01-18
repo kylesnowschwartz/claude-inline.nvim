@@ -16,13 +16,11 @@ Single Claude CLI process stays alive, maintaining conversation memory. No WebSo
 lua/claude-inline/
 ├── init.lua      # Entry point, commands, keymaps, message routing
 ├── client.lua    # Claude process lifecycle, NDJSON parsing
-├── ui.lua        # Sidebar split, floating input, loading spinner, thinking folds
+├── ui.lua        # Sidebar split, floating input, loading spinner, thinking/tool folds
 ├── selection.lua # Visual mode capture with proper mode handling
 ├── config.lua    # Defaults and user config merge
 └── debug.lua     # Debug logging to /tmp/claude-inline-debug.log
 ```
-
-**Total: ~600 lines of Lua, zero external dependencies.**
 
 ## How It Works
 
@@ -41,10 +39,20 @@ The `-p` flag runs in print mode (non-interactive). Stream-json keeps conversati
 ### Message Types (Output)
 - `type: "system"` - Hook responses, init info. **Ignore these.**
 - `type: "stream_event"` - Granular streaming events (with `--include-partial-messages`):
-  - `event.type: "content_block_start"` with `content_block.type` ("thinking" or "text")
-  - `event.type: "content_block_delta"` with `delta.type` ("thinking_delta" or "text_delta")
-  - `event.type: "content_block_stop"`
-- `type: "assistant"` - Response content in `msg.message.content[].text`
+  - `event.type: "content_block_start"` with `content_block.type`:
+    - `"thinking"` - Extended thinking block
+    - `"text"` - Text response
+    - `"tool_use"` - Tool invocation (includes `name`, `id`)
+  - `event.type: "content_block_delta"` with `delta.type`:
+    - `"thinking_delta"` - Incremental thinking content
+    - `"text_delta"` - Incremental text content
+    - `"input_json_delta"` - Streaming JSON for tool input parameters
+  - `event.type: "content_block_stop"` - Block finished streaming
+- `type: "assistant"` - Response content in `msg.message.content[]`:
+  - `type: "text"` - Text content in `.text`
+  - `type: "tool_use"` - Tool call with `.name`, `.id`, `.input`
+- `type: "user"` - Tool results returned to Claude:
+  - `type: "tool_result"` - Result with `.tool_use_id`, `.content`, `.is_error`
 - `type: "result"` - Final result in `msg.result`, signals completion
 
 ### Flow
@@ -90,6 +98,35 @@ When Claude uses extended thinking, the plugin shows a collapsible section:
 The fold markers are vim-style (`{{{`/`}}}`) with `foldmethod=marker` on the buffer.
 
 **Known limitation (Jan 2026):** Claude CLI does not expose extended thinking events for OAuth-authenticated users. The `--betas interleaved-thinking` flag is rejected with "not allowed". The infrastructure is complete and will work if/when CLI adds support. API-key users with direct API access may have different capabilities.
+
+### Tool Use Display
+When Claude invokes tools (read files, run commands, etc.), the plugin displays collapsible blocks:
+
+**Tool invocation:**
+```
+> [tool: read_file] running...
+> +--
+> |   path: "lua/claude-inline/init.lua"
+> +--
+```
+
+**Tool result:**
+```
+> [result: read_file] success
+> +--
+> |   (245 lines)
+> |   --- claude-inline.nvim...
+> +--
+```
+
+Flow:
+1. `content_block_start` with `type: "tool_use"` triggers `ui.show_tool_use()`
+2. `content_block_delta` with `type: "input_json_delta"` streams parameters via `ui.update_tool_input()`
+3. `content_block_stop` finalizes with `ui.complete_tool()`, auto-collapses the block
+4. `user` message with `type: "tool_result"` triggers `ui.show_tool_result()`, auto-collapses
+5. Claude continues with response text
+
+Tool blocks use `foldexpr` level 2 folds (nested inside assistant message), collapsible with `za`.
 
 ## Commands & Keymaps
 
