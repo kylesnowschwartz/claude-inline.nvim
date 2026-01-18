@@ -28,12 +28,14 @@ function M.show(callback)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_option_value('buftype', 'nofile', { buf = buf })
   vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = buf })
+  vim.api.nvim_set_option_value('filetype', 'markdown', { buf = buf })
 
   -- Calculate position (center of editor)
   local editor_width = vim.o.columns
   local editor_height = vim.o.lines - vim.o.cmdheight
   local width = config.width
   local height = config.height
+  local max_height = math.floor(editor_height * 0.6) -- Cap at 60% of editor
   local row = math.floor((editor_height - height) / 2)
   local col = math.floor((editor_width - width) / 2)
 
@@ -54,6 +56,45 @@ function M.show(callback)
 
   state.input_win = win
   state.input_buf = buf
+
+  -- Enable wrap so long lines don't scroll horizontally out of view
+  vim.api.nvim_set_option_value('wrap', true, { win = win })
+  vim.api.nvim_set_option_value('linebreak', true, { win = win })
+
+  -- Auto-resize window on text changes (handles paste of large content)
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
+    buffer = buf,
+    callback = function()
+      if not vim.api.nvim_win_is_valid(win) then
+        return
+      end
+
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+
+      -- Calculate visual line count (accounting for wrap)
+      local visual_lines = 0
+      for _, line in ipairs(lines) do
+        -- Each line takes at least 1 visual line, plus extra for wrapping
+        visual_lines = visual_lines + math.max(1, math.ceil(vim.fn.strdisplaywidth(line) / width))
+      end
+
+      -- Resize window to fit content (between min and max)
+      local new_height = math.max(config.height, math.min(visual_lines, max_height))
+      local win_config = vim.api.nvim_win_get_config(win)
+
+      if win_config.height ~= new_height then
+        -- Recenter vertically when height changes
+        local new_row = math.floor((editor_height - new_height) / 2)
+        vim.api.nvim_win_set_config(win, {
+          relative = 'editor',
+          row = new_row,
+          col = col,
+          width = width,
+          height = new_height,
+        })
+      end
+    end,
+  })
 
   vim.cmd 'startinsert'
 
