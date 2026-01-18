@@ -6,7 +6,7 @@ default: check test
 # Check Lua syntax and run linter
 check:
     @echo "Checking Lua syntax..."
-    @for f in lua/claude-inline/*.lua; do luajit -bl "$f" > /dev/null || exit 1; done
+    @find lua -name "*.lua" -exec luajit -bl {} \; > /dev/null
     @echo "Running luacheck..."
     @luacheck lua/ tests/ --config .luacheckrc
 
@@ -21,6 +21,8 @@ format:
 
 # Run a quick smoke test (faster than full test suite)
 smoke:
+    @echo "Syntax check..."
+    @find lua -name "*.lua" -exec luajit -bl {} \; > /dev/null
     @echo "Quick smoke test..."
     @nvim --headless -u tests/minimal_init.lua +"lua require('claude-inline.ui').show_sidebar(); require('claude-inline.ui').append_message('user', 'test'); print('OK'); vim.cmd('qall!')"
 

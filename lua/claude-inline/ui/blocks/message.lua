@@ -105,13 +105,14 @@ function M.append(role, text)
 end
 
 --- Update the last assistant message (for streaming)
+--- Note: tools_shown flag in init.lua prevents this from being called
+--- when tools are displayed, so we can safely replace to end of buffer
 ---@param text string
 function M.update_last(text)
   if not buffer.is_valid() then
     return
   end
 
-  -- Get last assistant block via extmarks
   local last_block = state.message_blocks[#state.message_blocks]
   if not last_block or last_block.role ~= 'assistant' then
     return
@@ -124,7 +125,6 @@ function M.update_last(text)
 
   -- Content starts after header line (mark[1] is 0-indexed row)
   local start_line = mark[1] + 1
-
   local new_lines = vim.split(text .. '\n', '\n', { plain = true })
 
   buffer.with_modifiable(function()
@@ -137,7 +137,6 @@ end
 --- Mark the current message as complete
 --- Called when streaming completes or before starting a new message
 function M.close_current()
-  -- Just mark the message as complete (foldexpr handles fold boundaries)
   state.current_message_open = false
 end
 

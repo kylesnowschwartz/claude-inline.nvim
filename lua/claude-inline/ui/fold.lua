@@ -27,13 +27,30 @@ function M.foldexpr()
     return '>1'
   end
 
-  -- Tool use/result headers start level 2 folds (nested inside assistant)
+  -- Tools group header starts level 2 fold (groups all tools under one fold)
+  if line:match '^> %[tools:' then
+    return '>2'
+  end
+
+  -- Individual tool entries (tree-style) start level 3 folds (nested inside tools group)
+  -- Matches: >   ├─ [tool] or >   └─ [tool]
+  if line:match '^>   [├└]' then
+    return '>3'
+  end
+
+  -- Legacy: old-style tool use/result headers start level 2 folds
   if line:match '^> %[tool:' or line:match '^> %[result:' then
     return '>2'
   end
 
+  -- Tool content lines (tree connectors) stay at level 3
+  -- Matches: >   │ (content) or >      (content after └)
+  if line:match '^>   │' or line:match '^>      ' then
+    return '3'
+  end
+
   -- Lines with > prefix are inside nested sections (level 2)
-  -- This covers thinking content, tool parameters, and tool results
+  -- This covers thinking content and other prefixed content
   if line:match '^> ' then
     return '2'
   end
