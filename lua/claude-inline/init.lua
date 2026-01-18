@@ -17,8 +17,11 @@ M._state = {
   -- Track tool IDs we've already shown (prevents duplicates from assistant fallback)
   shown_tool_ids = {},
   -- Track if any tools have been shown for the current message
-  -- Once tools are displayed, we stop updating text to avoid wiping them
+  -- Once tools are displayed, text must be rendered in post-tools region
   tools_shown = false,
+  -- Post-tool text tracking: text that arrives after tools are shown
+  post_tools_text = '',
+  post_tools_extmark_id = nil,
 }
 
 --- Reset streaming state for a new message
@@ -27,6 +30,8 @@ local function reset_streaming_state()
   M._state.stream_blocks = {}
   M._state.shown_tool_ids = {}
   M._state.tools_shown = false
+  M._state.post_tools_text = ''
+  M._state.post_tools_extmark_id = nil
 end
 
 --- Handle incoming messages from Claude CLI
@@ -77,9 +82,19 @@ local function handle_message(msg)
 
       if delta.type == 'text_delta' then
         ui.hide_loading()
-        M._state.streaming_text = M._state.streaming_text .. (delta.text or '')
-        -- Don't update text if tools have been shown - it would wipe them
-        if not M._state.tools_shown then
+        local text_chunk = delta.text or ''
+        M._state.streaming_text = M._state.streaming_text .. text_chunk
+        if M._state.tools_shown then
+          -- Tools displayed - render text in post-tools region
+          -- Initialize region on first post-tool text
+          if not M._state.post_tools_extmark_id then
+            M._state.post_tools_extmark_id = ui.init_post_tools_region()
+          end
+          M._state.post_tools_text = M._state.post_tools_text .. text_chunk
+          -- Replace region with FULL accumulated text (not append chunks)
+          ui.update_post_tools_text(M._state.post_tools_extmark_id, M._state.post_tools_text)
+        else
+          -- No tools yet - safe to replace from header
           ui.update_last_message(M._state.streaming_text)
         end
       elseif delta.type == 'input_json_delta' then
@@ -103,16 +118,26 @@ local function handle_message(msg)
     -- Stop spinner immediately when we get content
     ui.hide_loading()
 
-    -- If we already have streamed content via stream_events, skip text blocks
-    -- The assistant message is just a summary of what we already displayed
     local content = msg.message and msg.message.content
     if type(content) == 'table' then
       for _, block in ipairs(content) do
         if block.type == 'text' then
-          -- Only show text if we haven't streamed it already
-          if M._state.streaming_text == '' then
-            M._state.streaming_text = M._state.streaming_text .. (block.text or '')
-            ui.update_last_message(M._state.streaming_text)
+          local text = block.text or ''
+          -- Check if this text is NEW (not already in streaming_text)
+          local already_streamed = M._state.streaming_text:find(text, 1, true) ~= nil
+          if not already_streamed and text ~= '' then
+            M._state.streaming_text = M._state.streaming_text .. text
+            if M._state.tools_shown then
+              -- Tools displayed - render in post-tools region
+              if not M._state.post_tools_extmark_id then
+                M._state.post_tools_extmark_id = ui.init_post_tools_region()
+              end
+              M._state.post_tools_text = M._state.post_tools_text .. text
+              ui.update_post_tools_text(M._state.post_tools_extmark_id, M._state.post_tools_text)
+            else
+              -- No tools - safe to replace from header
+              ui.update_last_message(M._state.streaming_text)
+            end
           end
         elseif block.type == 'tool_use' then
           -- Fallback for non-streaming: show tool_use from final message

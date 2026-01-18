@@ -140,6 +140,54 @@ function M.update_last(text)
   buffer.scroll_to_bottom()
 end
 
+--- Initialize post-tool text region (creates extmark at current end of buffer)
+--- Call this when first text_delta arrives after tools_shown becomes true
+---@return number extmark_id The extmark ID to track this region
+function M.init_post_tools_region()
+  if not buffer.is_valid() then
+    return -1
+  end
+
+  local line_count = vim.api.nvim_buf_line_count(state.sidebar_buf)
+
+  -- Insert blank line to separate tools from text
+  buffer.with_modifiable(function()
+    vim.api.nvim_buf_set_lines(state.sidebar_buf, line_count, line_count, false, { '' })
+  end)
+
+  -- Create extmark at this line (right_gravity=true so it stays when we insert after)
+  local extmark_id = vim.api.nvim_buf_set_extmark(state.sidebar_buf, state.MESSAGE_NS, line_count, 0, {
+    right_gravity = false, -- Stays at current position
+  })
+
+  return extmark_id
+end
+
+--- Update post-tool text region (replaces from extmark to end with accumulated text)
+--- Use this instead of update_last when tools have been shown
+---@param extmark_id number The extmark from init_post_tools_region
+---@param text string The FULL accumulated post-tool text
+function M.update_post_tools_text(extmark_id, text)
+  if not buffer.is_valid() then
+    return
+  end
+
+  local mark = vim.api.nvim_buf_get_extmark_by_id(state.sidebar_buf, state.MESSAGE_NS, extmark_id, {})
+  if not mark or #mark == 0 then
+    return
+  end
+
+  -- Replace from extmark line to end of buffer with the full text
+  local start_line = mark[1]
+  local new_lines = vim.split(text, '\n', { plain = true })
+
+  buffer.with_modifiable(function()
+    vim.api.nvim_buf_set_lines(state.sidebar_buf, start_line, -1, false, new_lines)
+  end)
+
+  buffer.scroll_to_bottom()
+end
+
 --- Mark the current message as complete
 --- Called when streaming completes or before starting a new message
 function M.close_current()

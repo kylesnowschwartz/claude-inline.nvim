@@ -34,6 +34,8 @@ M.toggle_sidebar = sidebar.toggle
 -- Re-export message functions
 M.append_message = message.append
 M.update_last_message = message.update_last
+M.init_post_tools_region = message.init_post_tools_region
+M.update_post_tools_text = message.update_post_tools_text
 M.close_current_message = message.close_current
 
 -- Re-export tool use functions

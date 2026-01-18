@@ -483,6 +483,212 @@ local function test_grep_match_count()
   assert_true(found, 'Grep tool should show match or file count')
 end
 
+-- Test: Text after tool results is displayed
+-- Regression test for: https://github.com/kylesnowschwartz/claude-inline.nvim/issues/XXX
+-- Scenario: User asks about a LICENSE file. Claude:
+--   1. Streams "Let me find and read the LICENSE file"
+--   2. Runs Glob tool -> tools_shown = true
+--   3. Runs Read tool
+--   4. Sends final text explaining the license limitations
+-- Bug: Final explanation text was NOT displayed because:
+--   a) text_delta was blocked by tools_shown flag
+--   b) assistant message text was blocked by non-empty streaming_text
+local function test_text_after_tools_displayed()
+  setup()
+
+  -- 1. Initial text streaming (before tools)
+  inject {
+    type = 'stream_event',
+    event = {
+      type = 'content_block_start',
+      index = 0,
+      content_block = { type = 'text' },
+    },
+  }
+  inject {
+    type = 'stream_event',
+    event = {
+      type = 'content_block_delta',
+      index = 0,
+      delta = { type = 'text_delta', text = 'Let me find and read the LICENSE file.' },
+    },
+  }
+  inject {
+    type = 'stream_event',
+    event = {
+      type = 'content_block_stop',
+      index = 0,
+    },
+  }
+
+  -- Verify initial text is shown
+  local lines = get_lines()
+  local initial_text_found = false
+  for _, line in ipairs(lines) do
+    if line:match 'Let me find and read the LICENSE file' then
+      initial_text_found = true
+    end
+  end
+  assert_true(initial_text_found, 'Initial text should appear before tools')
+
+  -- 2. First tool: Glob
+  simulate_tool {
+    index = 1,
+    name = 'Glob',
+    input = { pattern = '**/LICENSE' },
+    result_content = '/path/to/LICENSE',
+    metadata = { numFiles = 1 },
+  }
+
+  -- 3. Second tool: Read
+  simulate_tool {
+    index = 2,
+    name = 'Read',
+    input = { file_path = '/path/to/LICENSE' },
+    result_content = 'GNU AFFERO GENERAL PUBLIC LICENSE...',
+    metadata = { file = { numLines = 247 } },
+  }
+
+  -- 4. Stream text AFTER tool results (the actual answer)
+  -- This is what was broken - text_delta blocked by tools_shown
+  inject {
+    type = 'stream_event',
+    event = {
+      type = 'content_block_start',
+      index = 3,
+      content_block = { type = 'text' },
+    },
+  }
+  inject {
+    type = 'stream_event',
+    event = {
+      type = 'content_block_delta',
+      index = 3,
+      delta = { type = 'text_delta', text = 'The AGPL v3 license sets these core limitations:' },
+    },
+  }
+  inject {
+    type = 'stream_event',
+    event = {
+      type = 'content_block_delta',
+      index = 3,
+      delta = { type = 'text_delta', text = ' Network copyleft requirement means you must share source code.' },
+    },
+  }
+  inject {
+    type = 'stream_event',
+    event = {
+      type = 'content_block_stop',
+      index = 3,
+    },
+  }
+
+  -- 5. Final result message
+  inject { type = 'result', result = '' }
+
+  -- Verify: BOTH initial text AND final explanation should be visible
+  lines = get_lines()
+
+  -- Debug: print all lines
+  print '    Buffer contents:'
+  for i, line in ipairs(lines) do
+    print(string.format('      %d: %s', i, line))
+  end
+
+  local glob_found = false
+  local read_found = false
+  local final_text_found = false
+  local copyleft_found = false
+
+  for _, line in ipairs(lines) do
+    if line:match 'Glob%(' then
+      glob_found = true
+    end
+    if line:match 'Read%(' then
+      read_found = true
+    end
+    if line:match 'AGPL v3 license sets these core limitations' then
+      final_text_found = true
+    end
+    if line:match 'Network copyleft' or line:match 'share source code' then
+      copyleft_found = true
+    end
+  end
+
+  assert_true(glob_found, 'Glob tool should be displayed')
+  assert_true(read_found, 'Read tool should be displayed')
+  assert_true(final_text_found, 'Final explanation text MUST appear after tools')
+  assert_true(copyleft_found, 'Streamed continuation text MUST appear')
+end
+
+-- Test: Assistant message text after tools (fallback path)
+-- Tests the non-streaming path where text arrives in assistant message
+local function test_assistant_message_text_after_tools()
+  setup()
+
+  -- 1. Initial text
+  inject {
+    type = 'stream_event',
+    event = {
+      type = 'content_block_start',
+      index = 0,
+      content_block = { type = 'text' },
+    },
+  }
+  inject {
+    type = 'stream_event',
+    event = {
+      type = 'content_block_delta',
+      index = 0,
+      delta = { type = 'text_delta', text = 'Looking up the file.' },
+    },
+  }
+
+  -- 2. Tool execution
+  simulate_tool {
+    index = 1,
+    name = 'Read',
+    input = { file_path = 'test.txt' },
+    result_content = 'file content here',
+  }
+
+  -- 3. Final assistant message with NEW text content (not streamed)
+  -- This simulates the message from the JSONL where the final explanation
+  -- arrives as an assistant message content block, not via stream_event
+  inject {
+    type = 'assistant',
+    message = {
+      role = 'assistant',
+      content = {
+        {
+          type = 'text',
+          text = 'Based on the file content, here is my analysis.',
+        },
+      },
+    },
+  }
+
+  -- 4. Result
+  inject { type = 'result', result = '' }
+
+  local lines = get_lines()
+
+  -- Debug output
+  print '    Buffer contents:'
+  for i, line in ipairs(lines) do
+    print(string.format('      %d: %s', i, line))
+  end
+
+  local analysis_found = false
+  for _, line in ipairs(lines) do
+    if line:match 'Based on the file content' or line:match 'my analysis' then
+      analysis_found = true
+    end
+  end
+
+  assert_true(analysis_found, 'Assistant message text after tools MUST be displayed')
+end
+
 function M.run()
   local tests = {
     { 'read tool display', test_read_tool },
@@ -493,6 +699,8 @@ function M.run()
     { 'system messages ignored', test_system_ignored },
     { 'glob file count', test_glob_file_count },
     { 'grep match count', test_grep_match_count },
+    { 'text after tools displayed', test_text_after_tools_displayed },
+    { 'assistant message text after tools', test_assistant_message_text_after_tools },
   }
 
   local passed, failed = 0, 0

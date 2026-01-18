@@ -76,61 +76,41 @@ The `-p` flag runs in print mode (non-interactive). Stream-json keeps conversati
 5. `handle_message()` stops spinner on first content, updates sidebar text
 6. On `result` message, streaming state resets for next turn
 
+## Conversation History
+
+Claude-Code by default stores conversation history, scoped per working directory, in ~/.claude/projects
+
+These JSONL files contain critical insight into how Claude-Code operates. But they are also private, and not backed up. You can READ ONLY from these files, but never use private personal data from within them in documentation, and never remove or clear them.
+
+These files are huge. Parse their keys with jq before trying to read the contents of said keys.
+
 ## Critical Implementation Details
 
-### Environment Inheritance
-Claude CLI needs full environment for auth credentials. **Do not filter:**
-```lua
--- WRONG: strips HOME, auth tokens, etc.
-local env = { 'PATH=' .. vim.fn.getenv('PATH') }
-uv.spawn(cmd, { args = args, env = env, ... })
+These are hard-won lessons. Each represents a debugging session that uncovered non-obvious behavior.
 
--- RIGHT: inherit everything
-uv.spawn(cmd, { args = args, stdio = {...} }, callback)
-```
+### Environment Inheritance
+**Principle:** Never filter environment variables when spawning Claude CLI. It needs HOME, auth tokens, and other variables to function. Let the process inherit the full environment.
 
 ### Spinner Race Condition
-The loading spinner runs on a 100ms timer calling `update_last_message()`. When Claude responds, we also call `update_last_message()` with actual content. **Must stop spinner BEFORE processing assistant message**, or timer overwrites response:
-```lua
-if msg_type == 'assistant' then
-  ui.hide_loading()  -- FIRST: stop the timer
-  -- THEN: process content
-end
-```
+**Principle:** Timers and async callbacks create race conditions. The loading spinner's timer can overwrite real content if not stopped first. Always cancel async operations before processing their replacement.
 
 ### Buffer Line Indexing
-Lua arrays are 1-indexed, `nvim_buf_set_lines` is 0-indexed. The code exploits this: when we find `**Claude:**` at Lua index `i`, passing `i` to `nvim_buf_set_lines` replaces content AFTER that line (which is what we want).
+**Principle:** Lua arrays are 1-indexed, Neovim APIs are 0-indexed. This off-by-one difference can be exploited intentionally but causes bugs if forgotten. Be explicit about which indexing system each variable uses.
 
-### Extmark Drift with nvim_buf_set_lines
-**Problem:** `nvim_buf_set_lines(buf, line, line+1, ...)` looks like an "update" but is actually delete+insert. With `right_gravity=true` (default), extmarks at that position drift forward on every "update".
+### Extmark Drift
+**Principle:** `nvim_buf_set_lines` on a single line is delete+insert, not update. Extmarks with right_gravity drift forward on each "update". Use `nvim_buf_set_text` for true in-place modifications that don't affect extmark positions.
 
-**Symptom:** Extmarks tracking tool positions slowly drift to wrong lines after input streaming updates.
+**Corollary:** Keep right_gravity=true (default) for extmarks that should move when content is inserted before them.
 
-**Solution:** Use `nvim_buf_set_text` for in-place line content updates - it modifies text without delete+insert semantics:
-```lua
--- WRONG: extmarks drift forward
-vim.api.nvim_buf_set_lines(buf, line_num, line_num + 1, false, { new_text })
+### Parallel Task Nesting
+**Principle:** Don't infer parent-child relationships from call order when operations can run in parallel. Claude CLI provides explicit `parent_tool_use_id` on messages - use it instead of maintaining a stack.
 
--- RIGHT: extmarks stay put
-local old_line = vim.api.nvim_buf_get_lines(buf, line_num, line_num + 1, false)[1] or ''
-vim.api.nvim_buf_set_text(buf, line_num, 0, line_num, #old_line, { new_text })
-```
+### Streaming Text Rendering
+**Core insight:** Streaming text works by **replacing an entire region** with accumulated content on each update, not by appending chunks. Appending individual chunks creates word-per-line output because each append becomes a new line.
 
-Keep `right_gravity=true` (default) so extmarks move when lines are inserted BEFORE them - that behavior is correct for tracking dynamic positions.
+**The interleaving problem:** Claude responses can interleave text and tools: `text -> tool -> text -> tool -> final_text`. Once tools occupy buffer space, you can't replace "from header to end" without wiping them.
 
-### Parallel Task Nesting with parent_tool_use_id
-**Problem:** When Claude runs parallel Task agents, their children interleave. A stack-based model incorrectly nests Task 2 inside Task 1.
-
-**Solution:** Claude CLI provides `parent_tool_use_id` on messages:
-- Top-level tools: `parent_tool_use_id: null`
-- Sub-agent tools: `parent_tool_use_id: "<task_id_that_spawned_this>"`
-
-Use this explicit parent ID instead of inferring from a stack:
-```lua
--- In stream_event handler:
-local parent_id = msg.parent_tool_use_id  -- nil for top-level, task_id for children
-ui.show_tool_use(block.id, block.name, block.input, parent_id)
-```
+**Solution pattern:** Track separate regions with extmarks. Each region (pre-tool text, tools, post-tool text) gets its own tracked position. Update each region by replacing it entirely with accumulated content for that region.
 
 ### Tool Use Display
 When Claude invokes tools (read files, run commands, etc.), the plugin displays single-line entries:
@@ -153,14 +133,7 @@ Bash(npm test) ✗ exit 1     # Error with exit code
 
 When `tool_use_result` metadata is available, results show file counts, duration, exit codes, and truncation status.
 
-Flow:
-1. `content_block_start` with `type: "tool_use"` triggers `ui.show_tool_use()`
-2. `content_block_delta` with `type: "input_json_delta"` streams parameters via `ui.update_tool_input()`
-3. `content_block_stop` finalizes with `ui.complete_tool()`
-4. `user` message with `type: "tool_result"` triggers `ui.show_tool_result()` - updates line in-place
-5. Claude continues with response text
-
-Tools are tracked with extmarks so parallel Task children are correctly positioned under their parent.
+**Lifecycle:** Tool display follows the Claude CLI stream-json event sequence: block starts (show placeholder) -> input streams in (update display) -> block stops -> result arrives (finalize with status). Tools are tracked with extmarks for position stability.
 
 ## Commands & Keymaps
 
