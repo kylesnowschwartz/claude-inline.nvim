@@ -37,13 +37,8 @@ function M.show(tool_use_id, content, is_error, metadata)
   local meta_str = format.metadata_suffix(metadata)
 
   if tool_block.is_task then
-    -- Task completion: pop from stack, insert completion line after children
-    for i = #state.task_stack, 1, -1 do
-      if state.task_stack[i] == tool_use_id then
-        table.remove(state.task_stack, i)
-        break
-      end
-    end
+    -- Task completion: insert completion line after children
+    -- No stack manipulation needed - parent_tool_use_id from messages handles nesting
 
     -- Find insert position: after task header + all its children
     local insert_line

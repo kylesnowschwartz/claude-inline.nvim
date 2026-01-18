@@ -44,6 +44,12 @@ watch:
     @echo "Watching for changes... (Ctrl-C to stop)"
     @find lua tests -name "*.lua" | entr -c just test
 
+# Debug Claude CLI JSON output - pipe a prompt to see message structure
+debug-cli prompt="hello":
+    @echo "{{prompt}}" | claude -p --output-format stream-json 2>&1 | tee /tmp/claude-debug.jsonl
+    @echo ""
+    @echo "Output saved to /tmp/claude-debug.jsonl"
+
 # Show test output with verbose logging
 test-verbose:
     @nvim --headless -u tests/minimal_init.lua +"lua require('claude-inline').setup({debug=true}); require('tests.ui_spec').run()"

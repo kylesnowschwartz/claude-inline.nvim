@@ -36,13 +36,14 @@ end
 ---@param tool_id string
 ---@param tool_name string
 ---@param input table|nil
-function M.show(tool_id, tool_name, input)
+---@param parent_tool_use_id string|nil Explicit parent from message (nil for top-level)
+function M.show(tool_id, tool_name, input, parent_tool_use_id)
   if not buffer.is_valid() then
     return
   end
 
   local is_task = tool_name == 'Task'
-  local parent_task_id = state.task_stack[#state.task_stack]
+  local parent_task_id = parent_tool_use_id -- Use explicit parent, not stack
 
   -- Create block record
   local block = {
@@ -87,9 +88,7 @@ function M.show(tool_id, tool_name, input)
     if insert_line > max_line then
       insert_line = max_line
     end
-
-    -- Push onto task stack
-    table.insert(state.task_stack, tool_id)
+    -- No stack push needed - parent_tool_use_id from messages handles nesting
   else
     -- Regular tool: render with indent if has parent
     local indent = parent_task_id and '  ' or ''
@@ -124,7 +123,8 @@ function M.show(tool_id, tool_name, input)
     vim.api.nvim_buf_set_lines(state.sidebar_buf, insert_line, insert_line, false, { line_text })
   end)
 
-  -- Create extmark at the inserted line (right_gravity=true so it moves with insertions)
+  -- Create extmark at the inserted line with right_gravity=true (default) so it moves
+  -- when lines are inserted before it. We use nvim_buf_set_text for updates to avoid drift.
   block.extmark_id = vim.api.nvim_buf_set_extmark(state.sidebar_buf, state.TOOL_NS, insert_line, 0, {})
 
   state.content_blocks[tool_id] = block
@@ -164,8 +164,11 @@ function M.update_input(tool_id, partial_json)
           line_text = indent .. format.tool_line(block.name, parsed) .. ' ...'
         end
 
+        -- Use nvim_buf_set_text to replace line content without delete+insert,
+        -- which would cause extmarks with right_gravity=true to drift
         buffer.with_modifiable(function()
-          vim.api.nvim_buf_set_lines(state.sidebar_buf, line_num, line_num + 1, false, { line_text })
+          local old_line = vim.api.nvim_buf_get_lines(state.sidebar_buf, line_num, line_num + 1, false)[1] or ''
+          vim.api.nvim_buf_set_text(state.sidebar_buf, line_num, 0, line_num, #old_line, { line_text })
         end)
       end
     end

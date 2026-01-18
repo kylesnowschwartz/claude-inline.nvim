@@ -25,7 +25,6 @@ local function setup()
   state.sidebar_win = nil
   state.message_blocks = {}
   state.content_blocks = {}
-  state.task_stack = {}
 
   -- Reset init state
   init._state.streaming_text = ''
@@ -214,8 +213,10 @@ local function test_parallel_tasks_interleaved()
   }
 
   -- Child of Task 1: first Bash command
+  -- parent_tool_use_id tells us this belongs to task_1
   inject {
     type = 'stream_event',
+    parent_tool_use_id = 'task_1',
     event = {
       type = 'content_block_start',
       index = 2,
@@ -229,8 +230,10 @@ local function test_parallel_tasks_interleaved()
   }
 
   -- Child of Task 2: first Bash command (interleaved!)
+  -- parent_tool_use_id tells us this belongs to task_2
   inject {
     type = 'stream_event',
+    parent_tool_use_id = 'task_2',
     event = {
       type = 'content_block_start',
       index = 3,
@@ -254,8 +257,10 @@ local function test_parallel_tasks_interleaved()
   }
 
   -- Child of Task 1: retry with different command
+  -- parent_tool_use_id tells us this belongs to task_1
   inject {
     type = 'stream_event',
+    parent_tool_use_id = 'task_1',
     event = {
       type = 'content_block_start',
       index = 4,

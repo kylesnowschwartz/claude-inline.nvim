@@ -53,7 +53,9 @@ local function handle_message(msg)
           name = block.name,
         }
         -- Show the tool use in the UI
-        ui.show_tool_use(block.id, block.name, block.input)
+        -- parent_tool_use_id comes from the message level, not the block
+        local parent_id = msg.parent_tool_use_id
+        ui.show_tool_use(block.id, block.name, block.input, parent_id)
         M._state.tools_shown = true
       elseif block.type == 'text' then
         -- Starting a text block
@@ -107,7 +109,9 @@ local function handle_message(msg)
           -- Fallback for non-streaming: show tool_use from final message
           -- This handles cases where stream_events weren't available
           if not M._state.content_blocks[block.id] then
-            ui.show_tool_use(block.id, block.name, block.input)
+            -- parent_tool_use_id comes from the message level
+            local parent_id = msg.parent_tool_use_id
+            ui.show_tool_use(block.id, block.name, block.input, parent_id)
             ui.complete_tool(block.id)
             ui.collapse_tool(block.id)
             M._state.tools_shown = true

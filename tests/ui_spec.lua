@@ -477,8 +477,6 @@ local function test_foldexpr_tool_headers()
   vim.api.nvim_set_current_buf(ui._state.sidebar_buf)
 
   -- Assistant header should still start level 1 fold
-  vim.v.lnum = 1
-  local header_level = ui.foldexpr()
   -- Line 1 might be empty if the Claude header is elsewhere, find it
   local lines = vim.api.nvim_buf_get_lines(ui._state.sidebar_buf, 0, -1, false)
   for i, line in ipairs(lines) do

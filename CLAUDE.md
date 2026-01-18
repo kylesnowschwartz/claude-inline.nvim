@@ -87,6 +87,37 @@ end
 ### Buffer Line Indexing
 Lua arrays are 1-indexed, `nvim_buf_set_lines` is 0-indexed. The code exploits this: when we find `**Claude:**` at Lua index `i`, passing `i` to `nvim_buf_set_lines` replaces content AFTER that line (which is what we want).
 
+### Extmark Drift with nvim_buf_set_lines
+**Problem:** `nvim_buf_set_lines(buf, line, line+1, ...)` looks like an "update" but is actually delete+insert. With `right_gravity=true` (default), extmarks at that position drift forward on every "update".
+
+**Symptom:** Extmarks tracking tool positions slowly drift to wrong lines after input streaming updates.
+
+**Solution:** Use `nvim_buf_set_text` for in-place line content updates - it modifies text without delete+insert semantics:
+```lua
+-- WRONG: extmarks drift forward
+vim.api.nvim_buf_set_lines(buf, line_num, line_num + 1, false, { new_text })
+
+-- RIGHT: extmarks stay put
+local old_line = vim.api.nvim_buf_get_lines(buf, line_num, line_num + 1, false)[1] or ''
+vim.api.nvim_buf_set_text(buf, line_num, 0, line_num, #old_line, { new_text })
+```
+
+Keep `right_gravity=true` (default) so extmarks move when lines are inserted BEFORE them - that behavior is correct for tracking dynamic positions.
+
+### Parallel Task Nesting with parent_tool_use_id
+**Problem:** When Claude runs parallel Task agents, their children interleave. A stack-based model incorrectly nests Task 2 inside Task 1.
+
+**Solution:** Claude CLI provides `parent_tool_use_id` on messages:
+- Top-level tools: `parent_tool_use_id: null`
+- Sub-agent tools: `parent_tool_use_id: "<task_id_that_spawned_this>"`
+
+Use this explicit parent ID instead of inferring from a stack:
+```lua
+-- In stream_event handler:
+local parent_id = msg.parent_tool_use_id  -- nil for top-level, task_id for children
+ui.show_tool_use(block.id, block.name, block.input, parent_id)
+```
+
 ### Tool Use Display
 When Claude invokes tools (read files, run commands, etc.), the plugin displays collapsible blocks:
 
