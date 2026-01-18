@@ -6,6 +6,17 @@ local buffer = require 'claude-inline.ui.buffer'
 
 local M = {}
 
+--- Define sign highlight groups for fold markers
+--- Called once during setup to ensure highlight groups exist
+local function define_highlights()
+  -- Signs for top-level foldable blocks (message headers)
+  vim.api.nvim_set_hl(0, 'CISignUser', { fg = '#61afef', bold = true }) -- Blue
+  vim.api.nvim_set_hl(0, 'CISignAssistant', { fg = '#c678dd', bold = true }) -- Purple
+end
+
+-- Define highlights on module load
+define_highlights()
+
 --- Check if sidebar is open
 ---@return boolean
 function M.is_open()
@@ -52,7 +63,7 @@ function M.show()
   vim.api.nvim_set_option_value('linebreak', true, { win = state.sidebar_win })
   vim.api.nvim_set_option_value('number', false, { win = state.sidebar_win })
   vim.api.nvim_set_option_value('relativenumber', false, { win = state.sidebar_win })
-  vim.api.nvim_set_option_value('signcolumn', 'no', { win = state.sidebar_win })
+  vim.api.nvim_set_option_value('signcolumn', 'yes:1', { win = state.sidebar_win })
   -- Folding: use manual initially, switch to expr after content is added
   -- This prevents vim from caching foldlevel=0 for empty buffer lines
   vim.api.nvim_set_option_value('foldmethod', 'manual', { win = state.sidebar_win })

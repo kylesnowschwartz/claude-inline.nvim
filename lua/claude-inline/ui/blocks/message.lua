@@ -12,8 +12,14 @@ local M = {}
 ---@param start_line number 0-indexed line where message starts
 ---@return number extmark_id
 local function create_extmark(role, start_line)
+  -- Sign indicators for message types (HUD: peripheral status awareness)
+  local sign_text = role == 'user' and '▶' or '◆'
+  local sign_hl = role == 'user' and 'CISignUser' or 'CISignAssistant'
+
   local mark_id = vim.api.nvim_buf_set_extmark(state.sidebar_buf, state.MESSAGE_NS, start_line, 0, {
     right_gravity = false, -- Stays put when text inserted at this position
+    sign_text = sign_text,
+    sign_hl_group = sign_hl,
   })
   table.insert(state.message_blocks, { id = mark_id, role = role, folded = false })
   return mark_id

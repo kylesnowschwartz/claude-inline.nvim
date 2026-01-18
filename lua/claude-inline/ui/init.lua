@@ -37,17 +37,12 @@ M.update_last_message = message.update_last
 M.close_current_message = message.close_current
 
 -- Re-export tool use functions
--- Wrapper to pass parent_tool_use_id through to tool_use.show
-function M.show_tool_use(id, name, tool_input, parent_tool_use_id)
-  tool_use.show(id, name, tool_input, parent_tool_use_id)
-end
+M.show_tool_use = tool_use.show
 M.update_tool_input = tool_use.update_input
 M.complete_tool = tool_use.complete
-M.collapse_tool = tool_use.collapse
 
 -- Re-export tool result functions
 M.show_tool_result = tool_result.show
-M.collapse_tool_result = tool_result.collapse
 
 -- Re-export block utility functions
 M.clear = blocks.clear_all

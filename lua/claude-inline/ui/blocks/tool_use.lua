@@ -195,10 +195,4 @@ function M.complete(tool_id, tool_state)
   end
 end
 
---- Collapse is a no-op for one-line display
----@param tool_id string
-function M.collapse(tool_id)
-  -- Single-line format doesn't need folding
-end
-
 return M

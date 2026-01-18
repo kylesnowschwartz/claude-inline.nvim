@@ -6,12 +6,6 @@ local buffer = require 'claude-inline.ui.buffer'
 
 local M = {}
 
--- Lazy-load block modules to avoid circular dependencies
--- These will be populated when accessed
-M.message = nil
-M.tool_use = nil
-M.tool_result = nil
-
 --- Get the message block at cursor position
 ---@return MessageBlock|nil
 function M.get_at_cursor()
@@ -67,7 +61,6 @@ function M.clear_all()
 
   state.current_message_open = false
   state.content_blocks = {}
-  state.task_stack = {}
 end
 
 return M

@@ -113,10 +113,4 @@ function M.show(tool_use_id, content, is_error, metadata)
   end
 end
 
---- Collapse is a no-op for one-line display
----@param tool_use_id string
-function M.collapse(tool_use_id)
-  -- Single-line format doesn't need folding
-end
-
 return M

@@ -86,8 +86,6 @@ local function handle_message(msg)
       local block_info = M._state.content_blocks[index]
       if block_info and block_info.type == 'tool_use' then
         ui.complete_tool(block_info.id)
-        -- Auto-collapse tool blocks after completion
-        ui.collapse_tool(block_info.id)
       end
     end
     return
@@ -117,13 +115,11 @@ local function handle_message(msg)
             ui.show_tool_use(block.id, block.name, block.input, parent_id)
             M._state.shown_tool_ids[block.id] = true
             ui.complete_tool(block.id)
-            ui.collapse_tool(block.id)
             M._state.tools_shown = true
           end
         elseif block.type == 'tool_result' then
           -- tool_result blocks appear in user messages, but handle here for safety
           ui.show_tool_result(block.tool_use_id, block.content, block.is_error)
-          ui.collapse_tool_result(block.tool_use_id)
         end
       end
     end
@@ -139,7 +135,6 @@ local function handle_message(msg)
       for _, block in ipairs(content) do
         if block.type == 'tool_result' then
           ui.show_tool_result(block.tool_use_id, block.content or '', block.is_error, metadata)
-          ui.collapse_tool_result(block.tool_use_id)
         end
       end
     end
