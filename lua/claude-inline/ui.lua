@@ -5,15 +5,15 @@ local M = {}
 local uv = vim.uv or vim.loop
 
 -- Namespace for message block extmarks
-local MESSAGE_NS = vim.api.nvim_create_namespace 'claude_inline_messages'
+local MESSAGE_NS = vim.api.nvim_create_namespace("claude_inline_messages")
 
 ---@class MessageBlock
 ---@field id number Extmark ID
----@field role 'user'|'assistant'|'thinking'|'tool'|'error'
+---@field role 'user'|'assistant'|'tool'|'error'
 ---@field folded boolean Whether currently collapsed
 
 ---@class ContentBlock
----@field type 'text'|'thinking'|'tool_use'|'tool_result'
+---@field type 'text'|'tool_use'|'tool_result'
 ---@field id string|nil Tool use ID (for tool_use/tool_result)
 ---@field name string|nil Tool name (for tool_use)
 ---@field start_line number 0-indexed line where block starts
@@ -30,9 +30,6 @@ local MESSAGE_NS = vim.api.nvim_create_namespace 'claude_inline_messages'
 ---@field loading_timer uv.uv_timer_t|nil
 ---@field spinner_index number
 ---@field config table|nil
----@field thinking_start_line number|nil Line where thinking section starts
----@field thinking_active boolean Whether currently streaming thinking
----@field response_start_line number|nil Line where response text starts (after thinking)
 ---@field message_blocks MessageBlock[] Array of message blocks with extmark IDs
 ---@field current_message_open boolean Whether current message needs closing fold marker
 ---@field content_blocks table<string, ContentBlock> Active content blocks by ID
@@ -46,9 +43,6 @@ M._state = {
   loading_timer = nil,
   spinner_index = 1,
   config = nil,
-  thinking_start_line = nil,
-  thinking_active = false,
-  response_start_line = nil,
   message_blocks = {},
   current_message_open = false,
   content_blocks = {},
@@ -64,9 +58,9 @@ local function with_modifiable(fn)
   if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
     return
   end
-  vim.api.nvim_set_option_value('modifiable', true, { buf = M._state.sidebar_buf })
+  vim.api.nvim_set_option_value("modifiable", true, { buf = M._state.sidebar_buf })
   local ok, result = pcall(fn)
-  vim.api.nvim_set_option_value('modifiable', false, { buf = M._state.sidebar_buf })
+  vim.api.nvim_set_option_value("modifiable", false, { buf = M._state.sidebar_buf })
   if not ok then
     error(result)
   end
@@ -90,42 +84,37 @@ function M.foldexpr()
   -- IMPORTANT: vim.fn.getline() may read from wrong buffer when foldexpr is evaluated
   -- Explicitly read from the sidebar buffer to ensure correct content
   if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
-    return '='
+    return "="
   end
 
   local lines = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, lnum - 1, lnum, false)
-  local line = lines[1] or ''
+  local line = lines[1] or ""
 
   -- Message headers start level 1 folds
   -- >1 means "start a fold at level 1" - automatically closes previous level 1 fold
-  if line:match '^%*%*You:%*%*' or line:match '^%*%*Claude:%*%*' then
-    return '>1'
-  end
-
-  -- Thinking headers start level 2 folds (nested inside assistant)
-  if line:match '^> %*Thinking' then
-    return '>2'
+  if line:match("^%*%*You:%*%*") or line:match("^%*%*Claude:%*%*") then
+    return ">1"
   end
 
   -- Tool use/result headers start level 2 folds (nested inside assistant)
-  if line:match '^> %[tool:' or line:match '^> %[result:' then
-    return '>2'
+  if line:match("^> %[tool:") or line:match("^> %[result:") then
+    return ">2"
   end
 
   -- Lines with > prefix are inside nested sections (level 2)
   -- This covers thinking content, tool parameters, and tool results
-  if line:match '^> ' then
-    return '2'
+  if line:match("^> ") then
+    return "2"
   end
 
   -- Transition out of nested section: previous line was prefixed, this isn't
   local prev_lines = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, lnum - 2, lnum - 1, false)
-  local prev = prev_lines[1] or ''
-  if prev:match '^> ' and not line:match '^> ' and line ~= '' then
-    return '1' -- Back to level 1 (still in assistant message)
+  local prev = prev_lines[1] or ""
+  if prev:match("^> ") and not line:match("^> ") and line ~= "" then
+    return "1" -- Back to level 1 (still in assistant message)
   end
 
-  return '=' -- Inherit from previous line
+  return "=" -- Inherit from previous line
 end
 
 --- Foldtext function for sidebar buffer
@@ -136,20 +125,20 @@ function M.foldtext()
   local line = vim.fn.getline(foldstart)
 
   -- Extract role from header
-  local role = line:match '^%*%*(.-):%*%*'
+  local role = line:match("^%*%*(.-):%*%*")
   if not role then
     return line -- Fallback
   end
 
   -- Get first content line for preview
   local content_line = vim.fn.getline(foldstart + 1)
-  if content_line and content_line ~= '' then
+  if content_line and content_line ~= "" then
     -- Truncate to 60 chars
     local preview = content_line:sub(1, 60)
     if #content_line > 60 then
-      preview = preview .. '...'
+      preview = preview .. "..."
     end
-    return string.format('**%s:** %s', role, preview)
+    return string.format("**%s:** %s", role, preview)
   end
 
   return line
@@ -161,7 +150,7 @@ local function close_input(win)
   vim.api.nvim_win_close(win, true)
   M._state.input_win = nil
   M._state.input_buf = nil
-  vim.cmd 'stopinsert'
+  vim.cmd("stopinsert")
 end
 
 --- Create an extmark to track a message block boundary
@@ -203,42 +192,50 @@ function M.show_sidebar()
   -- Create sidebar buffer if needed
   if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
     M._state.sidebar_buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_set_option_value('buftype', 'nofile', { buf = M._state.sidebar_buf })
-    vim.api.nvim_set_option_value('bufhidden', 'hide', { buf = M._state.sidebar_buf })
-    vim.api.nvim_set_option_value('swapfile', false, { buf = M._state.sidebar_buf })
-    vim.api.nvim_buf_set_name(M._state.sidebar_buf, 'Claude Chat')
-    vim.api.nvim_set_option_value('filetype', 'markdown', { buf = M._state.sidebar_buf })
+    vim.api.nvim_set_option_value("buftype", "nofile", { buf = M._state.sidebar_buf })
+    vim.api.nvim_set_option_value("bufhidden", "hide", { buf = M._state.sidebar_buf })
+    vim.api.nvim_set_option_value("swapfile", false, { buf = M._state.sidebar_buf })
+    vim.api.nvim_buf_set_name(M._state.sidebar_buf, "Claude Chat")
+    vim.api.nvim_set_option_value("filetype", "markdown", { buf = M._state.sidebar_buf })
 
     -- Enable treesitter highlighting (doesn't auto-activate on scratch buffers)
-    pcall(vim.treesitter.start, M._state.sidebar_buf, 'markdown')
+    pcall(vim.treesitter.start, M._state.sidebar_buf, "markdown")
   end
 
   -- Calculate width
   local width = math.floor(vim.o.columns * config.width)
 
   -- Create split (this focuses the new window)
-  local cmd = config.position == 'left' and 'topleft' or 'botright'
-  vim.cmd(cmd .. ' vertical ' .. width .. 'split')
+  local cmd = config.position == "left" and "topleft" or "botright"
+  vim.cmd(cmd .. " vertical " .. width .. "split")
 
   M._state.sidebar_win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(M._state.sidebar_win, M._state.sidebar_buf)
 
   -- Window options
-  vim.api.nvim_set_option_value('wrap', true, { win = M._state.sidebar_win })
-  vim.api.nvim_set_option_value('linebreak', true, { win = M._state.sidebar_win })
-  vim.api.nvim_set_option_value('number', false, { win = M._state.sidebar_win })
-  vim.api.nvim_set_option_value('relativenumber', false, { win = M._state.sidebar_win })
-  vim.api.nvim_set_option_value('signcolumn', 'no', { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value("wrap", true, { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value("linebreak", true, { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value("number", false, { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value("relativenumber", false, { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value("signcolumn", "no", { win = M._state.sidebar_win })
   -- Folding: use manual initially, switch to expr after content is added
   -- This prevents vim from caching foldlevel=0 for empty buffer lines
-  vim.api.nvim_set_option_value('foldmethod', 'manual', { win = M._state.sidebar_win })
-  vim.api.nvim_set_option_value('foldexpr', "v:lua.require'claude-inline.ui'.foldexpr()", { win = M._state.sidebar_win })
-  vim.api.nvim_set_option_value('foldtext', "v:lua.require'claude-inline.ui'.foldtext()", { win = M._state.sidebar_win })
-  vim.api.nvim_set_option_value('foldenable', true, { win = M._state.sidebar_win })
-  vim.api.nvim_set_option_value('foldlevel', 99, { win = M._state.sidebar_win }) -- Start open, collapse manually
+  vim.api.nvim_set_option_value("foldmethod", "manual", { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value(
+    "foldexpr",
+    "v:lua.require'claude-inline.ui'.foldexpr()",
+    { win = M._state.sidebar_win }
+  )
+  vim.api.nvim_set_option_value(
+    "foldtext",
+    "v:lua.require'claude-inline.ui'.foldtext()",
+    { win = M._state.sidebar_win }
+  )
+  vim.api.nvim_set_option_value("foldenable", true, { win = M._state.sidebar_win })
+  vim.api.nvim_set_option_value("foldlevel", 99, { win = M._state.sidebar_win }) -- Start open, collapse manually
 
   -- Setup autocmd to track window close
-  vim.api.nvim_create_autocmd('WinClosed', {
+  vim.api.nvim_create_autocmd("WinClosed", {
     pattern = tostring(M._state.sidebar_win),
     once = true,
     callback = function()
@@ -275,8 +272,8 @@ function M.append_message(role, text)
   M.close_current_message()
 
   -- Message header (foldexpr detects these for folding)
-  local prefix = role == 'user' and '**You:**' or '**Claude:**'
-  local lines = vim.split(prefix .. '\n' .. text .. '\n\n', '\n', { plain = true })
+  local prefix = role == "user" and "**You:**" or "**Claude:**"
+  local lines = vim.split(prefix .. "\n" .. text .. "\n\n", "\n", { plain = true })
   local start_line
 
   with_modifiable(function()
@@ -284,7 +281,7 @@ function M.append_message(role, text)
     local last_line = vim.api.nvim_buf_get_lines(M._state.sidebar_buf, line_count - 1, line_count, false)[1]
 
     -- If buffer is empty (just one empty line), replace it
-    if line_count == 1 and last_line == '' then
+    if line_count == 1 and last_line == "" then
       start_line = 0
       vim.api.nvim_buf_set_lines(M._state.sidebar_buf, 0, 1, false, lines)
     else
@@ -298,16 +295,16 @@ function M.append_message(role, text)
   -- Toggle through manual mode to force re-evaluation, then use zx to update
   if M.is_sidebar_open() then
     vim.api.nvim_win_call(M._state.sidebar_win, function()
-      if vim.wo.foldmethod == 'expr' then
-        vim.cmd 'setlocal foldmethod=manual'
+      if vim.wo.foldmethod == "expr" then
+        vim.cmd("setlocal foldmethod=manual")
       end
-      vim.cmd 'setlocal foldmethod=expr'
-      vim.cmd 'silent! normal! zx'
+      vim.cmd("setlocal foldmethod=expr")
+      vim.cmd("silent! normal! zx")
     end)
   end
 
   -- Track that assistant message is still streaming
-  M._state.current_message_open = (role == 'assistant')
+  M._state.current_message_open = (role == "assistant")
 
   create_message_extmark(role, start_line)
 
@@ -332,15 +329,15 @@ function M.append_message(role, text)
               local foldlevel_before = vim.fn.foldlevel(line)
               local closed_before = vim.fn.foldclosed(line)
               vim.api.nvim_win_set_cursor(M._state.sidebar_win, { line, 0 })
-              vim.cmd 'silent! normal! zc'
+              vim.cmd("silent! normal! zc")
               local closed_after = vim.fn.foldclosed(line)
               -- Debug output
               if M._state.config and M._state.config.debug then
-                local debug = require 'claude-inline.debug'
+                local debug = require("claude-inline.debug")
                 debug.log(
-                  'FOLD',
+                  "FOLD",
                   string.format(
-                    'block %d (%s) line %d [%s]: foldlevel=%d, closed %d->%d',
+                    "block %d (%s) line %d [%s]: foldlevel=%d, closed %d->%d",
                     i,
                     block.role,
                     line,
@@ -369,28 +366,21 @@ function M.update_last_message(text)
     return
   end
 
-  local start_line
-
-  -- If we have a response start line (after thinking section), use that
-  if M._state.response_start_line then
-    start_line = M._state.response_start_line
-  else
-    -- Get last assistant block via extmarks
-    local last_block = M._state.message_blocks[#M._state.message_blocks]
-    if not last_block or last_block.role ~= 'assistant' then
-      return
-    end
-
-    local mark = vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, last_block.id, {})
-    if not mark or #mark == 0 then
-      return
-    end
-
-    -- Content starts after header line (mark[1] is 0-indexed row)
-    start_line = mark[1] + 1
+  -- Get last assistant block via extmarks
+  local last_block = M._state.message_blocks[#M._state.message_blocks]
+  if not last_block or last_block.role ~= "assistant" then
+    return
   end
 
-  local new_lines = vim.split(text .. '\n', '\n', { plain = true })
+  local mark = vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, last_block.id, {})
+  if not mark or #mark == 0 then
+    return
+  end
+
+  -- Content starts after header line (mark[1] is 0-indexed row)
+  local start_line = mark[1] + 1
+
+  local new_lines = vim.split(text .. "\n", "\n", { plain = true })
 
   with_modifiable(function()
     vim.api.nvim_buf_set_lines(M._state.sidebar_buf, start_line, -1, false, new_lines)
@@ -404,116 +394,6 @@ end
 function M.close_current_message()
   -- Just mark the message as complete (foldexpr handles fold boundaries)
   M._state.current_message_open = false
-end
-
---- Start a thinking section in the sidebar
---- Note: Called after show_loading, which already added **Claude:** header
-function M.show_thinking()
-  if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
-    return
-  end
-
-  M._state.thinking_active = true
-
-  -- Insert thinking header (foldexpr detects "> *Thinking" for nested fold)
-  local header = '> *Thinking...*'
-
-  -- Find last assistant block via extmarks
-  local last_block = M._state.message_blocks[#M._state.message_blocks]
-  if not last_block or last_block.role ~= 'assistant' then
-    return
-  end
-
-  local mark = vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, last_block.id, {})
-  if not mark or #mark == 0 then
-    return
-  end
-
-  -- mark[1] is 0-indexed row where **Claude:** header is
-  local header_row = mark[1]
-
-  with_modifiable(function()
-    -- Replace everything after Claude: header with thinking header
-    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, header_row + 1, -1, false, { header })
-  end)
-
-  -- Thinking content starts after the thinking header line
-  M._state.thinking_start_line = header_row + 2
-end
-
---- Update thinking content (streaming)
----@param text string Full thinking text so far
-function M.update_thinking(text)
-  if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
-    return
-  end
-
-  if not M._state.thinking_start_line then
-    return
-  end
-
-  -- Format thinking lines with > prefix
-  local thinking_lines = vim.split(text, '\n', { plain = true })
-  local formatted = {}
-  for _, line in ipairs(thinking_lines) do
-    table.insert(formatted, '> ' .. line)
-  end
-
-  -- Replace from thinking start line onward
-  -- Keep the header line, replace content after it
-  local start_line = M._state.thinking_start_line
-  with_modifiable(function()
-    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, start_line, -1, false, formatted)
-  end)
-
-  scroll_to_bottom()
-end
-
---- Collapse thinking section and prepare for response
-function M.collapse_thinking()
-  if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
-    return
-  end
-
-  if not M._state.thinking_start_line or not M._state.thinking_active then
-    return
-  end
-
-  M._state.thinking_active = false
-
-  with_modifiable(function()
-    -- Count thinking lines for summary
-    local line_count = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
-    local thinking_line_count = line_count - M._state.thinking_start_line
-
-    -- Update header to show line count (foldexpr detects "> *Thinking" prefix)
-    local header_line = M._state.thinking_start_line - 1 -- 0-indexed
-    local header = string.format('> *Thinking (%d lines)*', thinking_line_count)
-    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, header_line, header_line + 1, false, { header })
-
-    -- Add blank line for response (foldexpr ends thinking fold when > prefix stops)
-    vim.api.nvim_buf_set_lines(M._state.sidebar_buf, -1, -1, false, { '' })
-
-    -- Track where response text should start
-    M._state.response_start_line = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
-  end)
-
-  -- Close the fold if sidebar window is valid
-  if M.is_sidebar_open() then
-    vim.schedule(function()
-      -- Move cursor to thinking header and close fold
-      local header_lnum = M._state.thinking_start_line
-      pcall(function()
-        vim.api.nvim_win_set_cursor(M._state.sidebar_win, { header_lnum, 0 })
-        vim.api.nvim_win_call(M._state.sidebar_win, function()
-          vim.cmd 'normal! zc'
-        end)
-        scroll_to_bottom()
-      end)
-    end)
-  end
-
-  M._state.thinking_start_line = nil
 end
 
 -- ============================================================================
@@ -533,34 +413,34 @@ function M.show_tool_use(tool_id, tool_name, input)
   -- Store the content block state
   local line_count = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
   M._state.content_blocks[tool_id] = {
-    type = 'tool_use',
+    type = "tool_use",
     id = tool_id,
     name = tool_name,
     start_line = line_count, -- 0-indexed
     end_line = nil,
     folded = false,
-    state = 'running',
-    input_json = '',
+    state = "running",
+    input_json = "",
   }
   M._state.current_tool_id = tool_id
 
   -- Render the tool header and initial content
-  local header = string.format('> [tool: %s] running...', tool_name)
-  local lines = { header, '> +--' }
+  local header = string.format("> [tool: %s] running...", tool_name)
+  local lines = { header, "> +--" }
 
   -- If we have initial input, format it
   if input and next(input) then
     for key, value in pairs(input) do
-      local value_str = type(value) == 'string' and value or vim.json.encode(value)
+      local value_str = type(value) == "string" and value or vim.json.encode(value)
       -- Truncate long values
       if #value_str > 60 then
-        value_str = value_str:sub(1, 57) .. '...'
+        value_str = value_str:sub(1, 57) .. "..."
       end
-      table.insert(lines, string.format('> |   %s: %s', key, value_str))
+      table.insert(lines, string.format("> |   %s: %s", key, value_str))
     end
   end
 
-  table.insert(lines, '> +--')
+  table.insert(lines, "> +--")
 
   with_modifiable(function()
     vim.api.nvim_buf_set_lines(M._state.sidebar_buf, -1, -1, false, lines)
@@ -580,25 +460,25 @@ function M.update_tool_input(tool_id, partial_json)
   end
 
   -- Accumulate the JSON string
-  block.input_json = (block.input_json or '') .. partial_json
+  block.input_json = (block.input_json or "") .. partial_json
 
   -- Try to parse and display what we have so far
   -- This is best-effort - partial JSON may not parse
   local ok, input = pcall(vim.json.decode, block.input_json)
-  if ok and input and type(input) == 'table' then
+  if ok and input and type(input) == "table" then
     -- Re-render the tool block with current input
-    local header = string.format('> [tool: %s] running...', block.name)
-    local lines = { header, '> +--' }
+    local header = string.format("> [tool: %s] running...", block.name)
+    local lines = { header, "> +--" }
 
     for key, value in pairs(input) do
-      local value_str = type(value) == 'string' and value or vim.json.encode(value)
+      local value_str = type(value) == "string" and value or vim.json.encode(value)
       if #value_str > 60 then
-        value_str = value_str:sub(1, 57) .. '...'
+        value_str = value_str:sub(1, 57) .. "..."
       end
-      table.insert(lines, string.format('> |   %s: %s', key, value_str))
+      table.insert(lines, string.format("> |   %s: %s", key, value_str))
     end
 
-    table.insert(lines, '> +--')
+    table.insert(lines, "> +--")
 
     with_modifiable(function()
       vim.api.nvim_buf_set_lines(M._state.sidebar_buf, block.start_line, -1, false, lines)
@@ -618,12 +498,12 @@ function M.complete_tool(tool_id, state)
     return
   end
 
-  block.state = state or 'success'
+  block.state = state or "success"
   block.end_line = vim.api.nvim_buf_line_count(M._state.sidebar_buf) - 1
 
   -- Parse final input JSON
   local input = {}
-  if block.input_json and block.input_json ~= '' then
+  if block.input_json and block.input_json ~= "" then
     local ok, parsed = pcall(vim.json.decode, block.input_json)
     if ok then
       input = parsed
@@ -631,22 +511,22 @@ function M.complete_tool(tool_id, state)
   end
 
   -- Re-render with final state
-  local status = block.state == 'success' and 'done' or 'error'
-  local header = string.format('> [tool: %s] %s', block.name, status)
-  local lines = { header, '> +--' }
+  local status = block.state == "success" and "done" or "error"
+  local header = string.format("> [tool: %s] %s", block.name, status)
+  local lines = { header, "> +--" }
 
   if input and next(input) then
     for key, value in pairs(input) do
-      local value_str = type(value) == 'string' and value or vim.json.encode(value)
+      local value_str = type(value) == "string" and value or vim.json.encode(value)
       if #value_str > 60 then
-        value_str = value_str:sub(1, 57) .. '...'
+        value_str = value_str:sub(1, 57) .. "..."
       end
-      table.insert(lines, string.format('> |   %s: %s', key, value_str))
+      table.insert(lines, string.format("> |   %s: %s", key, value_str))
     end
   end
 
-  table.insert(lines, '> +--')
-  table.insert(lines, '') -- Blank line after tool block
+  table.insert(lines, "> +--")
+  table.insert(lines, "") -- Blank line after tool block
 
   with_modifiable(function()
     vim.api.nvim_buf_set_lines(M._state.sidebar_buf, block.start_line, -1, false, lines)
@@ -674,7 +554,7 @@ function M.collapse_tool(tool_id)
         -- Move to tool header line and close fold
         vim.api.nvim_win_set_cursor(M._state.sidebar_win, { block.start_line + 1, 0 })
         vim.api.nvim_win_call(M._state.sidebar_win, function()
-          vim.cmd 'normal! zc'
+          vim.cmd("normal! zc")
         end)
         scroll_to_bottom()
       end)
@@ -693,64 +573,94 @@ end
 ---@param tool_use_id string The ID of the tool_use this result is for
 ---@param content string The result content
 ---@param is_error boolean|nil Whether this is an error result
-function M.show_tool_result(tool_use_id, content, is_error)
+---@param metadata table|nil Optional metadata (durationMs, numFiles, exitCode, truncated)
+function M.show_tool_result(tool_use_id, content, is_error, metadata)
   if not M._state.sidebar_buf or not vim.api.nvim_buf_is_valid(M._state.sidebar_buf) then
     return
   end
 
   -- Find the corresponding tool_use block for the name
   local tool_block = M._state.content_blocks[tool_use_id]
-  local tool_name = tool_block and tool_block.name or 'unknown'
+  local tool_name = tool_block and tool_block.name or "unknown"
 
   -- Store the content block state
   local line_count = vim.api.nvim_buf_line_count(M._state.sidebar_buf)
-  local result_id = 'result_' .. tool_use_id
+  local result_id = "result_" .. tool_use_id
   M._state.content_blocks[result_id] = {
-    type = 'tool_result',
+    type = "tool_result",
     id = result_id,
     name = tool_name,
     start_line = line_count, -- 0-indexed
     end_line = nil,
     folded = false,
-    state = is_error and 'error' or 'success',
+    state = is_error and "error" or "success",
   }
 
-  -- Format the result
-  local status = is_error and 'error' or 'success'
-  local header = string.format('> [result: %s] %s', tool_name, status)
-  local lines = { header, '> +--' }
+  -- Format the result header with metadata
+  local header_parts = {}
+  if metadata then
+    -- For file operations, show file count
+    if metadata.numFiles then
+      table.insert(header_parts, string.format("%d files", metadata.numFiles))
+    end
+    -- For bash commands, show exit code if non-zero
+    if metadata.exitCode and metadata.exitCode ~= 0 then
+      table.insert(header_parts, string.format("exit %d", metadata.exitCode))
+    end
+    -- Show duration
+    if metadata.durationMs then
+      if metadata.durationMs >= 1000 then
+        table.insert(header_parts, string.format("%.1fs", metadata.durationMs / 1000))
+      else
+        table.insert(header_parts, string.format("%dms", metadata.durationMs))
+      end
+    end
+    -- Note if truncated
+    if metadata.truncated then
+      table.insert(header_parts, "truncated")
+    end
+  end
+
+  local status = is_error and "error" or "success"
+  local header
+  if #header_parts > 0 then
+    header = string.format("> [result: %s] %s (%s)", tool_name, status, table.concat(header_parts, ", "))
+  else
+    header = string.format("> [result: %s] %s", tool_name, status)
+  end
+  local lines = { header, "> +--" }
 
   -- Summarize the content
-  local content_lines = vim.split(content or '', '\n', { plain = true })
+  local content_lines = vim.split(content or "", "\n", { plain = true })
   local line_count_display = #content_lines
 
   if line_count_display > 5 then
     -- Show summary for long results
-    table.insert(lines, string.format('> |   (%d lines)', line_count_display))
+    table.insert(lines, string.format("> |   (%d lines)", line_count_display))
     -- Show first 3 lines as preview
     for i = 1, math.min(3, #content_lines) do
       local preview_line = content_lines[i]:sub(1, 55)
       if #content_lines[i] > 55 then
-        preview_line = preview_line .. '...'
+        preview_line = preview_line .. "..."
       end
-      table.insert(lines, '> |   ' .. preview_line)
+      table.insert(lines, "> |   " .. preview_line)
     end
     if #content_lines > 3 then
-      table.insert(lines, '> |   ...')
+      table.insert(lines, "> |   ...")
     end
   else
     -- Show full content for short results
     for _, line in ipairs(content_lines) do
       local display_line = line:sub(1, 60)
       if #line > 60 then
-        display_line = display_line .. '...'
+        display_line = display_line .. "..."
       end
-      table.insert(lines, '> |   ' .. display_line)
+      table.insert(lines, "> |   " .. display_line)
     end
   end
 
-  table.insert(lines, '> +--')
-  table.insert(lines, '') -- Blank line after result block
+  table.insert(lines, "> +--")
+  table.insert(lines, "") -- Blank line after result block
 
   with_modifiable(function()
     vim.api.nvim_buf_set_lines(M._state.sidebar_buf, -1, -1, false, lines)
@@ -764,7 +674,7 @@ end
 --- Collapse a tool result block
 ---@param tool_use_id string The tool use ID (result ID will be derived)
 function M.collapse_tool_result(tool_use_id)
-  local result_id = 'result_' .. tool_use_id
+  local result_id = "result_" .. tool_use_id
   local block = M._state.content_blocks[result_id]
   if not block or block.folded then
     return
@@ -775,7 +685,7 @@ function M.collapse_tool_result(tool_use_id)
       pcall(function()
         vim.api.nvim_win_set_cursor(M._state.sidebar_win, { block.start_line + 1, 0 })
         vim.api.nvim_win_call(M._state.sidebar_win, function()
-          vim.cmd 'normal! zc'
+          vim.cmd("normal! zc")
         end)
         scroll_to_bottom()
       end)
@@ -797,10 +707,6 @@ function M.clear()
     vim.api.nvim_buf_set_lines(M._state.sidebar_buf, 0, -1, false, {})
   end)
 
-  -- Reset thinking state
-  M._state.thinking_start_line = nil
-  M._state.thinking_active = false
-  M._state.response_start_line = nil
   M._state.current_message_open = false
 
   -- Reset content block state
@@ -828,7 +734,8 @@ function M.get_block_at_cursor()
 
       -- End is either next block's start or buffer end
       if i < #M._state.message_blocks then
-        local next_mark = vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, M._state.message_blocks[i + 1].id, {})
+        local next_mark =
+          vim.api.nvim_buf_get_extmark_by_id(M._state.sidebar_buf, MESSAGE_NS, M._state.message_blocks[i + 1].id, {})
         end_row = next_mark and next_mark[1] - 1 or line_count - 1
       else
         end_row = line_count - 1
@@ -860,8 +767,8 @@ function M.show_input(callback)
 
   -- Create buffer
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_set_option_value('buftype', 'nofile', { buf = buf })
-  vim.api.nvim_set_option_value('bufhidden', 'wipe', { buf = buf })
+  vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+  vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
 
   -- Calculate position (center of editor)
   local editor_width = vim.o.columns
@@ -873,36 +780,36 @@ function M.show_input(callback)
 
   -- Create window
   local win = vim.api.nvim_open_win(buf, true, {
-    relative = 'editor',
+    relative = "editor",
     width = width,
     height = height,
     row = row,
     col = col,
-    style = 'minimal',
+    style = "minimal",
     border = config.border,
-    title = ' Send to Claude ',
-    title_pos = 'center',
-    footer = ' <CR>: Send | <Esc>: Cancel ',
-    footer_pos = 'center',
+    title = " Send to Claude ",
+    title_pos = "center",
+    footer = " <CR>: Send | <Esc>: Cancel ",
+    footer_pos = "center",
   })
 
   M._state.input_win = win
   M._state.input_buf = buf
 
-  vim.cmd 'startinsert'
+  vim.cmd("startinsert")
 
   -- Keymaps
   local opts = { buffer = buf, nowait = true, noremap = true, silent = true }
 
   -- Accept input with Enter
-  vim.keymap.set('i', '<CR>', function()
+  vim.keymap.set("i", "<CR>", function()
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    local input = table.concat(lines, '\n')
+    local input = table.concat(lines, "\n")
     input = vim.trim(input)
 
     close_input(win)
 
-    if callback and input ~= '' then
+    if callback and input ~= "" then
       callback(input)
     elseif callback then
       callback(nil)
@@ -910,7 +817,7 @@ function M.show_input(callback)
   end, opts)
 
   -- Cancel with Escape
-  vim.keymap.set({ 'i', 'n' }, '<Esc>', function()
+  vim.keymap.set({ "i", "n" }, "<Esc>", function()
     close_input(win)
     if callback then
       callback(nil)
@@ -927,7 +834,7 @@ function M.show_loading()
   local config = M._state.config.ui.loading
 
   -- Add "Claude:" marker first
-  M.append_message('assistant', '')
+  M.append_message("assistant", "")
 
   M._state.spinner_index = 1
   M._state.loading_timer = uv.new_timer()
@@ -941,7 +848,7 @@ function M.show_loading()
       end
 
       local spinner = config.spinner[M._state.spinner_index]
-      local text = spinner .. ' ' .. config.text
+      local text = spinner .. " " .. config.text
       M.update_last_message(text)
 
       M._state.spinner_index = M._state.spinner_index % #config.spinner + 1
@@ -967,9 +874,6 @@ function M.cleanup()
   end
   M._state.input_win = nil
   M._state.input_buf = nil
-  M._state.thinking_start_line = nil
-  M._state.thinking_active = false
-  M._state.response_start_line = nil
   M._state.message_blocks = {}
   M._state.current_message_open = false
   M._state.content_blocks = {}
@@ -983,7 +887,7 @@ function M.fold_all()
   end
 
   vim.api.nvim_win_call(M._state.sidebar_win, function()
-    vim.cmd 'silent! normal! zM'
+    vim.cmd("silent! normal! zM")
   end)
 
   for _, block in ipairs(M._state.message_blocks) do
@@ -998,7 +902,7 @@ function M.unfold_all()
   end
 
   vim.api.nvim_win_call(M._state.sidebar_win, function()
-    vim.cmd 'silent! %foldopen!'
+    vim.cmd("silent! %foldopen!")
   end)
 
   for _, block in ipairs(M._state.message_blocks) do
