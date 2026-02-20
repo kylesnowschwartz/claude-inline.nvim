@@ -114,7 +114,7 @@ local function test_user_message_header()
   ui.append_message("user", "Hello")
 
   local lines = vim.api.nvim_buf_get_lines(ui._state.sidebar_buf, 0, -1, false)
-  assert_eq(lines[1], "**You:**", "user message should have **You:** header")
+  assert_eq(lines[1], "You", "user message should have You header")
   assert_eq(lines[2], "Hello", "user message content should follow header")
   -- Verify no fold markers in content
   for _, line in ipairs(lines) do
@@ -130,7 +130,7 @@ local function test_assistant_message_header()
   ui.append_message("assistant", "Response")
 
   local lines = vim.api.nvim_buf_get_lines(ui._state.sidebar_buf, 0, -1, false)
-  assert_eq(lines[1], "**Claude:**", "assistant message should have **Claude:** header")
+  assert_eq(lines[1], "Claude", "assistant message should have Claude header")
   assert_true(ui._state.current_message_open, "current_message_open should be true")
 end
 
@@ -164,7 +164,7 @@ local function test_foldexpr_message_headers()
   -- Test assistant header (line 5 after user message + blanks)
   local lines = vim.api.nvim_buf_get_lines(ui._state.sidebar_buf, 0, -1, false)
   for i, line in ipairs(lines) do
-    if line == "**Claude:**" then
+    if line == "Claude" then
       vim.v.lnum = i
       assert_eq(ui.foldexpr(), ">1", "assistant header should start level 1 fold")
       break
@@ -182,7 +182,7 @@ local function test_foldtext_preview()
   vim.v.foldstart = 1
 
   local text = ui.foldtext()
-  assert_true(text:match("^%*%*You:%*%*"), "foldtext should start with role")
+  assert_true(text:match("^You"), "foldtext should start with role")
   assert_true(text:match("meaning of life"), "foldtext should include content preview")
 end
 
@@ -289,7 +289,7 @@ local function test_fold_integration_fold_all()
   -- Find assistant message line
   local lines = vim.api.nvim_buf_get_lines(ui._state.sidebar_buf, 0, -1, false)
   for i, line in ipairs(lines) do
-    if line:match("%*%*Claude") then
+    if line == "Claude" then
       local _, closed2 = get_fold_state(i)
       assert_true(closed2 > 0, "assistant message fold should be closed after fold_all")
       break
@@ -344,13 +344,13 @@ local function test_fold_integration_buffer_structure()
   local lines = vim.api.nvim_buf_get_lines(ui._state.sidebar_buf, 0, -1, false)
 
   -- Verify structure: header, content, blank lines
-  assert_eq(lines[1], "**You:**", "line 1 should be user header")
+  assert_eq(lines[1], "You", "line 1 should be user header")
   assert_eq(lines[2], "Hello world", "line 2 should be user content")
 
   -- Find assistant header
   local found_assistant = false
   for i, line in ipairs(lines) do
-    if line == "**Claude:**" then
+    if line == "Claude" then
       found_assistant = true
       assert_eq(lines[i + 1], "Hi there", "assistant content should follow header")
       break
@@ -449,7 +449,7 @@ local function test_foldexpr_tool_headers()
   -- Line 1 might be empty if the Claude header is elsewhere, find it
   local lines = vim.api.nvim_buf_get_lines(ui._state.sidebar_buf, 0, -1, false)
   for i, line in ipairs(lines) do
-    if line:match("^%*%*Claude:%*%*") then
+    if line == "Claude" then
       vim.v.lnum = i
       assert_eq(ui.foldexpr(), ">1", "assistant header should start level 1 fold")
       break

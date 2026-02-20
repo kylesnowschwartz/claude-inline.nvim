@@ -70,6 +70,10 @@ function M.show(tool_id, tool_name, input, parent_tool_use_id)
   block.extmark_id = vim.api.nvim_buf_set_extmark(state.sidebar_buf, state.TOOL_NS, insert_line, 0, {})
 
   state.content_blocks[tool_id] = block
+  -- Count top-level tools for assistant header metadata
+  if not parent_task_id then
+    state.assistant_tool_count = state.assistant_tool_count + 1
+  end
   buffer.scroll_to_bottom()
 end
 

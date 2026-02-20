@@ -25,6 +25,8 @@ local function setup()
   state.sidebar_win = nil
   state.message_blocks = {}
   state.content_blocks = {}
+  state.assistant_tool_count = 0
+  state.turn_start_ms = nil
 
   init.setup({ debug = false })
   ui.show_sidebar()
@@ -633,7 +635,7 @@ local function test_thinking_block_display()
   local content_found = false
 
   for _, line in ipairs(lines) do
-    if line == "> [thinking]" then
+    if line == "> **Thinking**" then
       header_found = true
     end
     if line == "> I need to consider the user's request." then
@@ -641,7 +643,7 @@ local function test_thinking_block_display()
     end
   end
 
-  assert_true(header_found, "Thinking block should have > [thinking] header")
+  assert_true(header_found, "Thinking block should have > **Thinking** header")
   assert_true(content_found, "Thinking content should be prefixed with > ")
 end
 

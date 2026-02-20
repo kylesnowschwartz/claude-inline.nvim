@@ -74,8 +74,8 @@ local function handle_message(msg)
         end
       elseif block.type == "thinking" and block.thinking and block.thinking ~= "" then
         ui.hide_loading()
-        -- Format as foldable section: > [thinking] header + > prefixed lines
-        local parts = { "> [thinking]" }
+        -- Format as foldable section: > **Thinking** header + > prefixed lines
+        local parts = { "> **Thinking**" }
         for _, line in ipairs(vim.split(block.thinking, "\n", { plain = true })) do
           parts[#parts + 1] = "> " .. line
         end

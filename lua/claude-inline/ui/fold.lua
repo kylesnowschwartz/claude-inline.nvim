@@ -21,9 +21,9 @@ function M.foldexpr()
   local lines = vim.api.nvim_buf_get_lines(state.sidebar_buf, lnum - 1, lnum, false)
   local line = lines[1] or ""
 
-  -- Message headers start level 1 folds
+  -- Message headers start level 1 folds (plain "You" / "Claude" with extmark styling)
   -- >1 means "start a fold at level 1" - automatically closes previous level 1 fold
-  if line:match("^%*%*You:%*%*") or line:match("^%*%*Claude:%*%*") then
+  if line == "You" or line == "Claude" then
     return ">1"
   end
 
@@ -56,7 +56,7 @@ function M.foldexpr()
   end
 
   -- Thinking section header starts level 2 fold
-  if line:match("^> %[thinking%]") then
+  if line:match("^> %*%*Thinking%*%*") then
     return ">2"
   end
 
@@ -102,26 +102,21 @@ function M.foldtext()
   end
 
   -- Thinking section: show line count
-  if line:match("^> %[thinking%]") then
+  if line:match("^> %*%*Thinking%*%*") then
     local line_count = foldend - foldstart
-    return string.format("> [thinking]  (%d lines)", line_count)
+    return string.format("> **Thinking**  (%d lines)", line_count)
   end
 
-  -- Extract role from message header
-  local role = line:match("^%*%*(.-):%*%*")
-  if not role then
-    return line -- Fallback
-  end
-
-  -- Get first content line for preview
-  local content_line = vim.fn.getline(foldstart + 1)
-  if content_line and content_line ~= "" then
-    -- Truncate to 60 chars
-    local preview = content_line:sub(1, 60)
-    if #content_line > 60 then
-      preview = preview .. "..."
+  -- Message header: show role + content preview
+  if line == "You" or line == "Claude" then
+    local content_line = vim.fn.getline(foldstart + 1)
+    if content_line and content_line ~= "" then
+      local preview = content_line:sub(1, 60)
+      if #content_line > 60 then
+        preview = preview .. "..."
+      end
+      return string.format("%s: %s", line, preview)
     end
-    return string.format("**%s:** %s", role, preview)
   end
 
   return line

@@ -37,11 +37,14 @@ local M = {
   message_blocks = {},
   current_message_open = false,
   content_blocks = {},
+  -- Per-turn assistant stats (reset on each new assistant message)
+  assistant_tool_count = 0,
+  turn_start_ms = nil,
 }
 
 -- Namespace for message block extmarks
-M.MESSAGE_NS = vim.api.nvim_create_namespace 'claude_inline_messages'
+M.MESSAGE_NS = vim.api.nvim_create_namespace("claude_inline_messages")
 -- Namespace for tool position extmarks
-M.TOOL_NS = vim.api.nvim_create_namespace 'claude_inline_tools'
+M.TOOL_NS = vim.api.nvim_create_namespace("claude_inline_tools")
 
 return M

@@ -12,14 +12,15 @@ local M = {}
 ---@param start_line number 0-indexed line where message starts
 ---@return number extmark_id
 local function create_extmark(role, start_line)
-  -- Sign indicators for message types (HUD: peripheral status awareness)
   local sign_text = role == "user" and "▶" or "◆"
   local sign_hl = role == "user" and "CISignUser" or "CISignAssistant"
+  local line_hl = role == "user" and "CIUserHeader" or "CIAssistantHeader"
 
   local mark_id = vim.api.nvim_buf_set_extmark(state.sidebar_buf, state.MESSAGE_NS, start_line, 0, {
     right_gravity = false, -- Stays put when text inserted at this position
     sign_text = sign_text,
     sign_hl_group = sign_hl,
+    line_hl_group = line_hl,
   })
   table.insert(state.message_blocks, { id = mark_id, role = role, folded = false })
   return mark_id
@@ -32,8 +33,8 @@ function M.append(role, text)
   -- Close any open message before starting a new one
   M.close_current()
 
-  -- Message header (foldexpr detects these for folding)
-  local prefix = role == "user" and "**You:**" or "**Claude:**"
+  -- Message header (plain text — extmark line_hl_group provides visual styling)
+  local prefix = role == "user" and "You" or "Claude"
   local lines = vim.split(prefix .. "\n" .. text .. "\n\n", "\n", { plain = true })
   local start_line
 
@@ -56,6 +57,12 @@ function M.append(role, text)
 
   -- Track that assistant message is still streaming
   state.current_message_open = (role == "assistant")
+
+  -- Reset per-turn stats for assistant messages
+  if role == "assistant" then
+    state.assistant_tool_count = 0
+    state.turn_start_ms = vim.uv.hrtime() / 1e6
+  end
 
   create_extmark(role, start_line)
 
@@ -157,9 +164,47 @@ function M.append_text(text)
   buffer.scroll_to_bottom()
 end
 
---- Mark the current message as complete
+--- Mark the current message as complete and annotate assistant header with stats
 --- Called when streaming completes or before starting a new message
 function M.close_current()
+  if not state.current_message_open then
+    return
+  end
+
+  -- Add right-aligned metadata to the last assistant header
+  local last_block = state.message_blocks[#state.message_blocks]
+  if last_block and last_block.role == "assistant" and buffer.is_valid() then
+    local parts = {}
+
+    if state.assistant_tool_count > 0 then
+      local noun = state.assistant_tool_count == 1 and "tool" or "tools"
+      table.insert(parts, string.format("%d %s", state.assistant_tool_count, noun))
+    end
+
+    if state.turn_start_ms then
+      local elapsed_ms = vim.uv.hrtime() / 1e6 - state.turn_start_ms
+      if elapsed_ms >= 1000 then
+        table.insert(parts, string.format("%.1fs", elapsed_ms / 1000))
+      end
+    end
+
+    if #parts > 0 then
+      local mark = vim.api.nvim_buf_get_extmark_by_id(state.sidebar_buf, state.MESSAGE_NS, last_block.id, {})
+      if mark and #mark > 0 then
+        -- Update the existing extmark to add virt_text (preserves sign + line_hl)
+        vim.api.nvim_buf_set_extmark(state.sidebar_buf, state.MESSAGE_NS, mark[1], 0, {
+          id = last_block.id,
+          right_gravity = false,
+          sign_text = "◆",
+          sign_hl_group = "CISignAssistant",
+          line_hl_group = "CIAssistantHeader",
+          virt_text = { { table.concat(parts, " · "), "CISummary" } },
+          virt_text_pos = "right_align",
+        })
+      end
+    end
+  end
+
   state.current_message_open = false
 end
 
