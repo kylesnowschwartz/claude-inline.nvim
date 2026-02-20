@@ -535,6 +535,175 @@ local function test_multiple_text_blocks()
   assert_true(analysis_found, "Text after tool results MUST be displayed")
 end
 
+-- Test: XML noise tags stripped from assistant text
+local function test_sanitize_xml_tags()
+  setup()
+
+  inject({
+    type = "assistant",
+    message = {
+      role = "assistant",
+      content = {
+        {
+          type = "text",
+          text = "Here is the answer.\n<system-reminder>\nIgnore this metadata.\n</system-reminder>\nThe end.",
+        },
+      },
+    },
+  })
+
+  local lines = get_lines()
+  local found_answer = false
+  local found_noise = false
+
+  for _, line in ipairs(lines) do
+    if line:match("Here is the answer") then
+      found_answer = true
+    end
+    if line:match("system%-reminder") or line:match("Ignore this metadata") then
+      found_noise = true
+    end
+  end
+
+  assert_true(found_answer, "Clean text should still appear")
+  assert_true(not found_noise, "system-reminder tags and content must be stripped")
+end
+
+-- Test: text that is ONLY noise tags produces no output
+local function test_sanitize_noise_only()
+  setup()
+  local initial_line_count = #get_lines()
+
+  inject({
+    type = "assistant",
+    message = {
+      role = "assistant",
+      content = {
+        {
+          type = "text",
+          text = "<local-command-caveat>This is noise.</local-command-caveat>",
+        },
+      },
+    },
+  })
+
+  local final_line_count = #get_lines()
+  assert_true(initial_line_count == final_line_count, "Noise-only text should produce no buffer output")
+end
+
+-- Test: truncated tool result shows indicator
+local function test_truncated_tool_result()
+  setup()
+  simulate_tool({
+    name = "Read",
+    input = { file_path = "huge_file.lua" },
+    result_content = "partial content...",
+    metadata = { file = { numLines = 5000 }, truncated = true },
+  })
+
+  local lines = get_lines()
+  local found = false
+  for _, line in ipairs(lines) do
+    if line:match("Read%(") and line:match("5000 lines") and line:match("%(truncated%)") then
+      found = true
+    end
+  end
+  assert_true(found, "Truncated Read should show line count AND (truncated)")
+end
+
+-- Test: thinking blocks display with > [thinking] prefix
+local function test_thinking_block_display()
+  setup()
+
+  inject({
+    type = "assistant",
+    message = {
+      role = "assistant",
+      content = {
+        {
+          type = "thinking",
+          thinking = "I need to consider the user's request.\nLet me think about this.",
+        },
+      },
+    },
+  })
+
+  local lines = get_lines()
+  local header_found = false
+  local content_found = false
+
+  for _, line in ipairs(lines) do
+    if line == "> [thinking]" then
+      header_found = true
+    end
+    if line == "> I need to consider the user's request." then
+      content_found = true
+    end
+  end
+
+  assert_true(header_found, "Thinking block should have > [thinking] header")
+  assert_true(content_found, "Thinking content should be prefixed with > ")
+end
+
+-- Test: empty thinking blocks are skipped
+local function test_thinking_block_empty()
+  setup()
+  local initial_line_count = #get_lines()
+
+  inject({
+    type = "assistant",
+    message = {
+      role = "assistant",
+      content = {
+        { type = "thinking", thinking = "" },
+      },
+    },
+  })
+
+  local final_line_count = #get_lines()
+  assert_true(initial_line_count == final_line_count, "Empty thinking block should produce no output")
+end
+
+-- Test: tool duration shown for individual tools
+local function test_tool_duration()
+  setup()
+  simulate_tool({
+    name = "Bash",
+    input = { command = "sleep 2" },
+    result_content = "",
+    metadata = { exitCode = 0, durationMs = 2150 },
+  })
+
+  local lines = get_lines()
+  local found = false
+  for _, line in ipairs(lines) do
+    if line:match("Bash%(") and line:match("2%.1s") then
+      found = true
+    end
+  end
+  assert_true(found, "Bash tool should show duration in seconds")
+end
+
+-- Test: fast tool duration shown in milliseconds
+local function test_tool_duration_ms()
+  setup()
+  simulate_tool({
+    name = "Read",
+    input = { file_path = "small.lua" },
+    result_content = "content",
+    metadata = { file = { numLines = 10 }, durationMs = 45 },
+  })
+
+  local lines = get_lines()
+  local found = false
+  for _, line in ipairs(lines) do
+    if line:match("Read%(") and line:match("10 lines") and line:match("45ms") then
+      found = true
+    end
+  end
+  assert_true(found, "Fast Read should show line count AND duration in ms")
+end
+
 function M.run()
   local tests = {
     { "read tool display", test_read_tool },
@@ -547,6 +716,13 @@ function M.run()
     { "grep match count", test_grep_match_count },
     { "text/tools/text interleaved", test_text_tools_text_interleaved },
     { "text after tool results", test_multiple_text_blocks },
+    { "sanitize XML noise tags", test_sanitize_xml_tags },
+    { "noise-only text skipped", test_sanitize_noise_only },
+    { "truncated tool result", test_truncated_tool_result },
+    { "thinking block display", test_thinking_block_display },
+    { "empty thinking block skipped", test_thinking_block_empty },
+    { "tool duration seconds", test_tool_duration },
+    { "tool duration milliseconds", test_tool_duration_ms },
   }
 
   local passed, failed = 0, 0

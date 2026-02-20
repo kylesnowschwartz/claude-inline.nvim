@@ -6,15 +6,15 @@ local M = {}
 -- Maps tool name to the input field that best identifies what it operates on
 ---@type table<string, string>
 local KEY_PARAM_FIELDS = {
-  Bash = 'command',
-  Read = 'file_path',
-  Grep = 'pattern',
-  Glob = 'pattern',
-  Edit = 'file_path',
-  Write = 'file_path',
-  Task = 'description',
-  WebSearch = 'query',
-  WebFetch = 'url',
+  Bash = "command",
+  Read = "file_path",
+  Grep = "pattern",
+  Glob = "pattern",
+  Edit = "file_path",
+  Write = "file_path",
+  Task = "description",
+  WebSearch = "query",
+  WebFetch = "url",
 }
 
 ---@param tool_name string
@@ -32,7 +32,7 @@ local function get_key_param(tool_name, input)
 
   -- Unknown tool: use first string value as reasonable fallback
   for _, v in pairs(input) do
-    if type(v) == 'string' then
+    if type(v) == "string" then
       return v
     end
   end
@@ -50,44 +50,53 @@ function M.tool_line(tool_name, input)
   end
 
   -- nvim_buf_set_lines rejects embedded newlines
-  key_param = key_param:gsub('\n', ' ')
-  return string.format('%s(%s)', tool_name, key_param)
+  key_param = key_param:gsub("\n", " ")
+  return string.format("%s(%s)", tool_name, key_param)
 end
 
 ---@param metadata table|nil tool_use_result from Claude CLI
 ---@return string suffix to append after status icon
 function M.metadata_suffix(metadata)
   if not metadata then
-    return ''
+    return ""
   end
+
+  local suffix = ""
 
   -- Read tool: show line count
   if metadata.file and metadata.file.numLines then
-    return string.format(' %d lines', metadata.file.numLines)
-  end
-
+    suffix = string.format(" %d lines", metadata.file.numLines)
   -- Bash tool: show exit code only on failure
-  if metadata.exitCode and metadata.exitCode ~= 0 then
-    return string.format(' exit %d', metadata.exitCode)
-  end
-
+  elseif metadata.exitCode and metadata.exitCode ~= 0 then
+    suffix = string.format(" exit %d", metadata.exitCode)
   -- Task (sub-agent): show duration and tool count
-  if metadata.totalDurationMs then
+  elseif metadata.totalDurationMs then
     local secs = metadata.totalDurationMs / 1000
-    return string.format(' %.1fs, %d tools', secs, metadata.totalToolUseCount or 0)
-  end
-
+    suffix = string.format(" %.1fs, %d tools", secs, metadata.totalToolUseCount or 0)
   -- Glob/file search: show file count
-  if metadata.numFiles then
-    return string.format(' %d files', metadata.numFiles)
-  end
-
+  elseif metadata.numFiles then
+    suffix = string.format(" %d files", metadata.numFiles)
   -- Grep/search: show match count
-  if metadata.numMatches then
-    return string.format(' %d matches', metadata.numMatches)
+  elseif metadata.numMatches then
+    suffix = string.format(" %d matches", metadata.numMatches)
   end
 
-  return ''
+  -- Individual tool duration (Task uses totalDurationMs above, skip double-counting)
+  if metadata.durationMs and not metadata.totalDurationMs then
+    local ms = metadata.durationMs
+    if ms >= 1000 then
+      suffix = suffix .. string.format(" %.1fs", ms / 1000)
+    else
+      suffix = suffix .. string.format(" %dms", ms)
+    end
+  end
+
+  -- Truncation appends to any tool's suffix
+  if metadata.truncated then
+    suffix = suffix .. " (truncated)"
+  end
+
+  return suffix
 end
 
 return M

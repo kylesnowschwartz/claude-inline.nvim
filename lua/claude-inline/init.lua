@@ -12,6 +12,32 @@ M._state = {
   initialized = false,
 }
 
+--- Strip XML noise tags injected by Claude CLI as system metadata.
+--- These tags appear in message content but add no value in the sidebar.
+---@param text string
+---@return string
+local function sanitize_text(text)
+  local noise_tags = { "system-reminder", "local-command-caveat" }
+  for _, tag in ipairs(noise_tags) do
+    local open = "<" .. tag .. ">"
+    local close = "</" .. tag .. ">"
+    while true do
+      local i = text:find(open, 1, true)
+      if not i then
+        break
+      end
+      local j = text:find(close, i, true)
+      if not j then
+        break
+      end
+      text = text:sub(1, i - 1) .. text:sub(j + #close)
+    end
+  end
+  -- Collapse runs of blank lines left behind by removed tags
+  text = text:gsub("\n\n\n+", "\n\n")
+  return vim.trim(text)
+end
+
 --- Handle incoming messages from Claude CLI
 --- Processes settled messages only (no streaming deltas).
 --- Each assistant JSONL entry contains exactly ONE content block.
@@ -41,13 +67,23 @@ local function handle_message(msg)
 
     for _, block in ipairs(content) do
       if block.type == "text" and block.text and block.text ~= "" then
+        local clean = sanitize_text(block.text)
+        if clean ~= "" then
+          ui.hide_loading()
+          ui.append_text(clean)
+        end
+      elseif block.type == "thinking" and block.thinking and block.thinking ~= "" then
         ui.hide_loading()
-        ui.append_text(block.text)
+        -- Format as foldable section: > [thinking] header + > prefixed lines
+        local parts = { "> [thinking]" }
+        for _, line in ipairs(vim.split(block.thinking, "\n", { plain = true })) do
+          parts[#parts + 1] = "> " .. line
+        end
+        ui.append_text(table.concat(parts, "\n"))
       elseif block.type == "tool_use" then
         ui.hide_loading()
         ui.show_tool_use(block.id, block.name, block.input, msg.parent_tool_use_id)
       end
-      -- thinking blocks: silently ignored
     end
     return
   end
