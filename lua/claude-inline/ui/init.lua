@@ -2,15 +2,15 @@
 --- Sidebar, input prompt, and loading spinner
 local M = {}
 
-local state = require 'claude-inline.ui.state'
-local fold = require 'claude-inline.ui.fold'
-local sidebar = require 'claude-inline.ui.sidebar'
-local input = require 'claude-inline.ui.input'
-local loading = require 'claude-inline.ui.loading'
-local message = require 'claude-inline.ui.blocks.message'
-local tool_use = require 'claude-inline.ui.blocks.tool_use'
-local tool_result = require 'claude-inline.ui.blocks.tool_result'
-local blocks = require 'claude-inline.ui.blocks'
+local state = require("claude-inline.ui.state")
+local fold = require("claude-inline.ui.fold")
+local sidebar = require("claude-inline.ui.sidebar")
+local input = require("claude-inline.ui.input")
+local loading = require("claude-inline.ui.loading")
+local message = require("claude-inline.ui.blocks.message")
+local tool_use = require("claude-inline.ui.blocks.tool_use")
+local tool_result = require("claude-inline.ui.blocks.tool_result")
+local blocks = require("claude-inline.ui.blocks")
 
 -- Re-export state for external access (debugging, etc.)
 M._state = state
@@ -33,15 +33,12 @@ M.toggle_sidebar = sidebar.toggle
 
 -- Re-export message functions
 M.append_message = message.append
+M.append_text = message.append_text
 M.update_last_message = message.update_last
-M.init_post_tools_region = message.init_post_tools_region
-M.update_post_tools_text = message.update_post_tools_text
 M.close_current_message = message.close_current
 
 -- Re-export tool use functions
 M.show_tool_use = tool_use.show
-M.update_tool_input = tool_use.update_input
-M.complete_tool = tool_use.complete
 
 -- Re-export tool result functions
 M.show_tool_result = tool_result.show

@@ -2,7 +2,7 @@
 --- Shows animated spinner while waiting for Claude response
 
 local uv = vim.uv or vim.loop
-local state = require 'claude-inline.ui.state'
+local state = require("claude-inline.ui.state")
 
 local M = {}
 
@@ -25,13 +25,13 @@ function M.show()
   end
 
   if not append_message_fn or not update_last_message_fn then
-    error 'Loading callbacks not registered. Call setup_callbacks first.'
+    error("Loading callbacks not registered. Call setup_callbacks first.")
   end
 
   local config = state.config.ui.loading
 
   -- Add "Claude:" marker first
-  append_message_fn('assistant', '')
+  append_message_fn("assistant", "")
 
   state.spinner_index = 1
   state.loading_timer = uv.new_timer()
@@ -45,7 +45,7 @@ function M.show()
       end
 
       local spinner = config.spinner[state.spinner_index]
-      local text = spinner .. ' ' .. config.text
+      local text = spinner .. " " .. config.text
       update_last_message_fn(text)
 
       state.spinner_index = state.spinner_index % #config.spinner + 1
@@ -53,12 +53,17 @@ function M.show()
   )
 end
 
---- Hide loading indicator
+--- Hide loading indicator and clear spinner text from buffer
 function M.hide()
   if state.loading_timer then
     state.loading_timer:stop()
     state.loading_timer:close()
     state.loading_timer = nil
+
+    -- Clear the spinner text, leaving just the assistant header
+    if update_last_message_fn then
+      update_last_message_fn("")
+    end
   end
 end
 

@@ -1,9 +1,9 @@
 --- Message block component for claude-inline.nvim
 --- Handles user and assistant message display
 
-local state = require 'claude-inline.ui.state'
-local buffer = require 'claude-inline.ui.buffer'
-local fold = require 'claude-inline.ui.fold'
+local state = require("claude-inline.ui.state")
+local buffer = require("claude-inline.ui.buffer")
+local fold = require("claude-inline.ui.fold")
 
 local M = {}
 
@@ -13,8 +13,8 @@ local M = {}
 ---@return number extmark_id
 local function create_extmark(role, start_line)
   -- Sign indicators for message types (HUD: peripheral status awareness)
-  local sign_text = role == 'user' and '▶' or '◆'
-  local sign_hl = role == 'user' and 'CISignUser' or 'CISignAssistant'
+  local sign_text = role == "user" and "▶" or "◆"
+  local sign_hl = role == "user" and "CISignUser" or "CISignAssistant"
 
   local mark_id = vim.api.nvim_buf_set_extmark(state.sidebar_buf, state.MESSAGE_NS, start_line, 0, {
     right_gravity = false, -- Stays put when text inserted at this position
@@ -33,8 +33,8 @@ function M.append(role, text)
   M.close_current()
 
   -- Message header (foldexpr detects these for folding)
-  local prefix = role == 'user' and '**You:**' or '**Claude:**'
-  local lines = vim.split(prefix .. '\n' .. text .. '\n\n', '\n', { plain = true })
+  local prefix = role == "user" and "**You:**" or "**Claude:**"
+  local lines = vim.split(prefix .. "\n" .. text .. "\n\n", "\n", { plain = true })
   local start_line
 
   buffer.with_modifiable(function()
@@ -42,7 +42,7 @@ function M.append(role, text)
     local last_line = vim.api.nvim_buf_get_lines(state.sidebar_buf, line_count - 1, line_count, false)[1]
 
     -- If buffer is empty (just one empty line), replace it
-    if line_count == 1 and last_line == '' then
+    if line_count == 1 and last_line == "" then
       start_line = 0
       vim.api.nvim_buf_set_lines(state.sidebar_buf, 0, 1, false, lines)
     else
@@ -55,7 +55,7 @@ function M.append(role, text)
   fold.refresh()
 
   -- Track that assistant message is still streaming
-  state.current_message_open = (role == 'assistant')
+  state.current_message_open = (role == "assistant")
 
   create_extmark(role, start_line)
 
@@ -80,15 +80,15 @@ function M.append(role, text)
               local foldlevel_before = vim.fn.foldlevel(line)
               local closed_before = vim.fn.foldclosed(line)
               vim.api.nvim_win_set_cursor(state.sidebar_win, { line, 0 })
-              vim.cmd 'silent! normal! zc'
+              vim.cmd("silent! normal! zc")
               local closed_after = vim.fn.foldclosed(line)
               -- Debug output
               if state.config and state.config.debug then
-                local debug = require 'claude-inline.debug'
+                local debug = require("claude-inline.debug")
                 debug.log(
-                  'FOLD',
+                  "FOLD",
                   string.format(
-                    'block %d (%s) line %d [%s]: foldlevel=%d, closed %d->%d',
+                    "block %d (%s) line %d [%s]: foldlevel=%d, closed %d->%d",
                     i,
                     block.role,
                     line,
@@ -120,7 +120,7 @@ function M.update_last(text)
   end
 
   local last_block = state.message_blocks[#state.message_blocks]
-  if not last_block or last_block.role ~= 'assistant' then
+  if not last_block or last_block.role ~= "assistant" then
     return
   end
 
@@ -131,7 +131,7 @@ function M.update_last(text)
 
   -- Content starts after header line (mark[1] is 0-indexed row)
   local start_line = mark[1] + 1
-  local new_lines = vim.split(text .. '\n', '\n', { plain = true })
+  local new_lines = vim.split(text .. "\n", "\n", { plain = true })
 
   buffer.with_modifiable(function()
     vim.api.nvim_buf_set_lines(state.sidebar_buf, start_line, -1, false, new_lines)
@@ -140,49 +140,18 @@ function M.update_last(text)
   buffer.scroll_to_bottom()
 end
 
---- Initialize post-tool text region (creates extmark at current end of buffer)
---- Call this when first text_delta arrives after tools_shown becomes true
----@return number extmark_id The extmark ID to track this region
-function M.init_post_tools_region()
-  if not buffer.is_valid() then
-    return -1
-  end
-
-  local line_count = vim.api.nvim_buf_line_count(state.sidebar_buf)
-
-  -- Insert blank line to separate tools from text
-  buffer.with_modifiable(function()
-    vim.api.nvim_buf_set_lines(state.sidebar_buf, line_count, line_count, false, { '' })
-  end)
-
-  -- Create extmark at this line (right_gravity=true so it stays when we insert after)
-  local extmark_id = vim.api.nvim_buf_set_extmark(state.sidebar_buf, state.MESSAGE_NS, line_count, 0, {
-    right_gravity = false, -- Stays at current position
-  })
-
-  return extmark_id
-end
-
---- Update post-tool text region (replaces from extmark to end with accumulated text)
---- Use this instead of update_last when tools have been shown
----@param extmark_id number The extmark from init_post_tools_region
----@param text string The FULL accumulated post-tool text
-function M.update_post_tools_text(extmark_id, text)
+--- Append text to the current assistant message (at end of buffer)
+--- Each call adds a new text block in order. No region tracking needed.
+---@param text string
+function M.append_text(text)
   if not buffer.is_valid() then
     return
   end
 
-  local mark = vim.api.nvim_buf_get_extmark_by_id(state.sidebar_buf, state.MESSAGE_NS, extmark_id, {})
-  if not mark or #mark == 0 then
-    return
-  end
-
-  -- Replace from extmark line to end of buffer with the full text
-  local start_line = mark[1]
-  local new_lines = vim.split(text, '\n', { plain = true })
+  local lines = vim.split(text, "\n", { plain = true })
 
   buffer.with_modifiable(function()
-    vim.api.nvim_buf_set_lines(state.sidebar_buf, start_line, -1, false, new_lines)
+    vim.api.nvim_buf_set_lines(state.sidebar_buf, -1, -1, false, lines)
   end)
 
   buffer.scroll_to_bottom()

@@ -2,200 +2,74 @@
 --- Send prompts to Claude CLI with persistent conversation context
 local M = {}
 
-local config = require 'claude-inline.config'
-local client = require 'claude-inline.client'
-local ui = require 'claude-inline.ui'
-local selection = require 'claude-inline.selection'
-local debug = require 'claude-inline.debug'
+local config = require("claude-inline.config")
+local client = require("claude-inline.client")
+local ui = require("claude-inline.ui")
+local selection = require("claude-inline.selection")
+local debug = require("claude-inline.debug")
 
 M._state = {
   initialized = false,
-  streaming_text = '',
-  -- Stream block tracking for stream events
-  -- Maps stream event index to content block data
-  stream_blocks = {},
-  -- Track tool IDs we've already shown (prevents duplicates from assistant fallback)
-  shown_tool_ids = {},
-  -- Track if any tools have been shown for the current message
-  -- Once tools are displayed, text must be rendered in post-tools region
-  tools_shown = false,
-  -- Post-tool text tracking: text that arrives after tools are shown
-  post_tools_text = '',
-  post_tools_extmark_id = nil,
 }
 
---- Reset streaming state for a new message
-local function reset_streaming_state()
-  M._state.streaming_text = ''
-  M._state.stream_blocks = {}
-  M._state.shown_tool_ids = {}
-  M._state.tools_shown = false
-  M._state.post_tools_text = ''
-  M._state.post_tools_extmark_id = nil
-end
-
 --- Handle incoming messages from Claude CLI
+--- Processes settled messages only (no streaming deltas).
+--- Each assistant JSONL entry contains exactly ONE content block.
 ---@param msg table
 local function handle_message(msg)
-  -- Debug logging
   debug.log_message(msg)
 
   local msg_type = msg.type
 
-  if msg_type == 'system' then
-    -- Ignore system/hook messages
+  -- System messages: hooks, init metadata. Ignore all of them.
+  if msg_type == "system" then
     return
   end
 
-  -- Handle granular streaming events (with --include-partial-messages)
-  if msg_type == 'stream_event' then
-    local event = msg.event
-    if not event then
+  -- Stream events: we don't use --include-partial-messages, so these
+  -- shouldn't arrive. Ignore defensively.
+  if msg_type == "stream_event" then
+    return
+  end
+
+  -- Assistant messages: each entry has one content block (thinking, text, or tool_use)
+  if msg_type == "assistant" then
+    local content = msg.message and msg.message.content
+    if not content or type(content) ~= "table" then
       return
     end
-    local index = event.index
 
-    if event.type == 'content_block_start' then
-      local block = event.content_block or {}
-
-      if block.type == 'tool_use' then
-        -- Starting a tool use block
+    for _, block in ipairs(content) do
+      if block.type == "text" and block.text and block.text ~= "" then
         ui.hide_loading()
-        -- Store block info for later reference
-        M._state.stream_blocks[index] = {
-          type = 'tool_use',
-          id = block.id,
-          name = block.name,
-        }
-        -- Show the tool use in the UI
-        -- parent_tool_use_id comes from the message level, not the block
-        local parent_id = msg.parent_tool_use_id
-        ui.show_tool_use(block.id, block.name, block.input, parent_id)
-        M._state.shown_tool_ids[block.id] = true
-        M._state.tools_shown = true
-      elseif block.type == 'text' then
-        -- Starting a text block
-        M._state.stream_blocks[index] = { type = 'text' }
-      end
-    elseif event.type == 'content_block_delta' then
-      local delta = event.delta or {}
-
-      if delta.type == 'text_delta' then
+        ui.append_text(block.text)
+      elseif block.type == "tool_use" then
         ui.hide_loading()
-        local text_chunk = delta.text or ''
-        M._state.streaming_text = M._state.streaming_text .. text_chunk
-        if M._state.tools_shown then
-          -- Tools displayed - render text in post-tools region
-          -- Initialize region on first post-tool text
-          if not M._state.post_tools_extmark_id then
-            M._state.post_tools_extmark_id = ui.init_post_tools_region()
-          end
-          M._state.post_tools_text = M._state.post_tools_text .. text_chunk
-          -- Replace region with FULL accumulated text (not append chunks)
-          ui.update_post_tools_text(M._state.post_tools_extmark_id, M._state.post_tools_text)
-        else
-          -- No tools yet - safe to replace from header
-          ui.update_last_message(M._state.streaming_text)
-        end
-      elseif delta.type == 'input_json_delta' then
-        -- Tool input JSON streaming
-        local block_info = M._state.stream_blocks[index]
-        if block_info and block_info.type == 'tool_use' then
-          ui.update_tool_input(block_info.id, delta.partial_json or '')
-        end
+        ui.show_tool_use(block.id, block.name, block.input, msg.parent_tool_use_id)
       end
-    elseif event.type == 'content_block_stop' then
-      -- Block finished streaming
-      local block_info = M._state.stream_blocks[index]
-      if block_info and block_info.type == 'tool_use' then
-        ui.complete_tool(block_info.id)
-      end
+      -- thinking blocks: silently ignored
     end
     return
   end
 
-  if msg_type == 'assistant' then
-    -- Stop spinner immediately when we get content
-    ui.hide_loading()
-
-    local content = msg.message and msg.message.content
-    if type(content) == 'table' then
-      for _, block in ipairs(content) do
-        if block.type == 'text' then
-          local text = block.text or ''
-          -- Check if this text is NEW (not already in streaming_text)
-          local already_streamed = M._state.streaming_text:find(text, 1, true) ~= nil
-          if not already_streamed and text ~= '' then
-            M._state.streaming_text = M._state.streaming_text .. text
-            if M._state.tools_shown then
-              -- Tools displayed - render in post-tools region
-              if not M._state.post_tools_extmark_id then
-                M._state.post_tools_extmark_id = ui.init_post_tools_region()
-              end
-              M._state.post_tools_text = M._state.post_tools_text .. text
-              ui.update_post_tools_text(M._state.post_tools_extmark_id, M._state.post_tools_text)
-            else
-              -- No tools - safe to replace from header
-              ui.update_last_message(M._state.streaming_text)
-            end
-          end
-        elseif block.type == 'tool_use' then
-          -- Fallback for non-streaming: show tool_use from final message
-          -- This handles cases where stream_events weren't available
-          if not M._state.shown_tool_ids[block.id] then
-            -- parent_tool_use_id comes from the message level
-            local parent_id = msg.parent_tool_use_id
-            ui.show_tool_use(block.id, block.name, block.input, parent_id)
-            M._state.shown_tool_ids[block.id] = true
-            ui.complete_tool(block.id)
-            M._state.tools_shown = true
-          end
-        elseif block.type == 'tool_result' then
-          -- tool_result blocks appear in user messages, but handle here for safety
-          ui.show_tool_result(block.tool_use_id, block.content, block.is_error)
-        end
-      end
-    end
-    return
-  end
-
-  if msg_type == 'user' then
-    -- User messages can contain tool_result blocks (from Claude executing tools)
-    -- tool_use_result contains metadata like durationMs, numFiles, exitCode, truncated
+  -- User messages: tool results flowing back to Claude
+  if msg_type == "user" then
     local metadata = msg.tool_use_result
     local content = msg.message and msg.message.content
-    if type(content) == 'string' then
-      -- Direct string content (e.g., from /context command output)
-      ui.hide_loading()
-      ui.update_last_message(content)
-    elseif type(content) == 'table' then
+    if type(content) == "table" then
       for _, block in ipairs(content) do
-        if block.type == 'tool_result' then
-          ui.show_tool_result(block.tool_use_id, block.content or '', block.is_error, metadata)
+        if block.type == "tool_result" then
+          ui.show_tool_result(block.tool_use_id, block.content or "", block.is_error, metadata)
         end
       end
     end
     return
   end
 
-  if msg_type == 'result' then
-    -- Final result
+  -- Result: conversation turn complete
+  if msg_type == "result" then
     ui.hide_loading()
-
-    local result_text = msg.result
-    if result_text and result_text ~= '' then
-      -- If we have streamed content, it's already shown
-      -- If not, show the result
-      if M._state.streaming_text == '' then
-        ui.update_last_message(result_text)
-      end
-    end
-
-    -- Close the current message fold (add closing marker)
     ui.close_current_message()
-
-    -- Reset streaming state
-    reset_streaming_state()
     return
   end
 end
@@ -204,14 +78,14 @@ end
 ---@param err string
 local function handle_error(err)
   ui.hide_loading()
-  vim.notify('Claude error: ' .. err, vim.log.levels.ERROR)
+  vim.notify("Claude error: " .. err, vim.log.levels.ERROR)
 end
 
 --- Send a prompt to Claude
 ---@param prompt string
 function M.send(prompt)
   if not M._state.initialized then
-    vim.notify('Claude Inline not initialized. Call setup() first.', vim.log.levels.ERROR)
+    vim.notify("Claude Inline not initialized. Call setup() first.", vim.log.levels.ERROR)
     return
   end
 
@@ -219,16 +93,13 @@ function M.send(prompt)
   ui.show_sidebar()
 
   -- Add user message to chat
-  ui.append_message('user', prompt)
-
-  -- Reset streaming state for new response
-  reset_streaming_state()
+  ui.append_message("user", prompt)
 
   -- Start client if needed
   if not client.is_running() then
     local ok = client.start(handle_message, handle_error)
     if not ok then
-      vim.notify('Failed to start Claude process', vim.log.levels.ERROR)
+      vim.notify("Failed to start Claude process", vim.log.levels.ERROR)
       return
     end
   end
@@ -253,10 +124,10 @@ function M.prompt_with_selection()
   local sel = selection.capture()
 
   -- Now exit visual mode
-  vim.cmd('normal! ' .. vim.api.nvim_replace_termcodes('<Esc>', true, false, true))
+  vim.cmd("normal! " .. vim.api.nvim_replace_termcodes("<Esc>", true, false, true))
 
   if not sel then
-    vim.notify('No text selected', vim.log.levels.WARN)
+    vim.notify("No text selected", vim.log.levels.WARN)
     return
   end
 
@@ -278,7 +149,6 @@ end
 function M.clear()
   ui.clear()
   client.stop()
-  reset_streaming_state()
 end
 
 --- Setup the plugin
@@ -297,51 +167,51 @@ function M.setup(opts)
   M._state.initialized = true
 
   -- Create user commands
-  vim.api.nvim_create_user_command('ClaudeInlineSend', function()
+  vim.api.nvim_create_user_command("ClaudeInlineSend", function()
     M.prompt()
-  end, { desc = 'Send prompt to Claude' })
+  end, { desc = "Send prompt to Claude" })
 
-  vim.api.nvim_create_user_command('ClaudeInlineToggle', function()
+  vim.api.nvim_create_user_command("ClaudeInlineToggle", function()
     M.toggle()
-  end, { desc = 'Toggle Claude chat sidebar' })
+  end, { desc = "Toggle Claude chat sidebar" })
 
-  vim.api.nvim_create_user_command('ClaudeInlineClear', function()
+  vim.api.nvim_create_user_command("ClaudeInlineClear", function()
     M.clear()
-  end, { desc = 'Clear Claude conversation' })
+  end, { desc = "Clear Claude conversation" })
 
-  vim.api.nvim_create_user_command('ClaudeInlineDebug', function(cmd)
-    if cmd.args == 'on' then
+  vim.api.nvim_create_user_command("ClaudeInlineDebug", function(cmd)
+    if cmd.args == "on" then
       debug.enable()
-    elseif cmd.args == 'off' then
+    elseif cmd.args == "off" then
       debug.disable()
     else
-      vim.notify('Usage: ClaudeInlineDebug on|off', vim.log.levels.INFO)
+      vim.notify("Usage: ClaudeInlineDebug on|off", vim.log.levels.INFO)
     end
-  end, { nargs = '?', desc = 'Toggle debug logging' })
+  end, { nargs = "?", desc = "Toggle debug logging" })
 
-  vim.api.nvim_create_user_command('ClaudeInlineFoldAll', function()
+  vim.api.nvim_create_user_command("ClaudeInlineFoldAll", function()
     ui.fold_all()
-  end, { desc = 'Collapse all Claude messages' })
+  end, { desc = "Collapse all Claude messages" })
 
-  vim.api.nvim_create_user_command('ClaudeInlineUnfoldAll', function()
+  vim.api.nvim_create_user_command("ClaudeInlineUnfoldAll", function()
     ui.unfold_all()
-  end, { desc = 'Expand all Claude messages' })
+  end, { desc = "Expand all Claude messages" })
 
   -- Setup keymaps
   local keymaps = cfg.keymaps
   if keymaps.send then
-    vim.keymap.set('n', keymaps.send, M.prompt, { desc = 'Send to Claude' })
-    vim.keymap.set('v', keymaps.send, M.prompt_with_selection, { desc = 'Send selection to Claude' })
+    vim.keymap.set("n", keymaps.send, M.prompt, { desc = "Send to Claude" })
+    vim.keymap.set("v", keymaps.send, M.prompt_with_selection, { desc = "Send selection to Claude" })
   end
   if keymaps.toggle then
-    vim.keymap.set('n', keymaps.toggle, M.toggle, { desc = 'Toggle Claude sidebar' })
+    vim.keymap.set("n", keymaps.toggle, M.toggle, { desc = "Toggle Claude sidebar" })
   end
   if keymaps.clear then
-    vim.keymap.set('n', keymaps.clear, M.clear, { desc = 'Clear Claude conversation' })
+    vim.keymap.set("n", keymaps.clear, M.clear, { desc = "Clear Claude conversation" })
   end
 
   -- Cleanup on Neovim exit
-  vim.api.nvim_create_autocmd('VimLeavePre', {
+  vim.api.nvim_create_autocmd("VimLeavePre", {
     callback = function()
       client.stop()
       ui.cleanup()

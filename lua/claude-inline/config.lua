@@ -32,7 +32,7 @@ M.defaults = {
       "stream-json",
       "--output-format",
       "stream-json",
-      "--include-partial-messages",
+      "--verbose",
       "--model",
       "haiku",
     },
